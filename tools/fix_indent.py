@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-이미 DeepL 초벌이 들어간 프로젝트 JSON 의 줄머리 전각공백(U+3000) 들여쓰기 복구.
+이미 DeepL 초벌이 들어간 프로젝트 JSON 의 DeepL 후처리 복구.
 
-DeepL 이 줄머리 들여쓰기 U+3000 을 반각공백으로 바꾸거나 삭제해 CardWirth 레이아웃이
-깨진 파일을, 원문(jp) 기준으로 줄 단위 복원한다. (app/deepl._restore_indent 재사용)
-번역 텍스트 자체는 건드리지 않고 '줄머리 들여쓰기 공백' 만 원문과 맞춘다.
+DeepL 이 망가뜨리는 두 가지를 원문(jp) 기준으로 되돌린다(번역 텍스트 자체는 유지):
+  1) 줄머리 전각공백(U+3000) 들여쓰기 → 반각/삭제된 것 복원 (app/deepl._restore_indent)
+  2) $...$ 변수 참조 안쪽 번역(예: $PC\\一人称$→$PC\\1인칭$) → 원문으로 복원 (_restore_vars)
 
 사용:
   python tools/fix_indent.py projects/어떤시나리오.json            # 백업 후 제자리 수정
@@ -44,16 +44,18 @@ def main() -> None:
             total += 1
             jp = textcodec.decode(u["jp"])
             ko = textcodec.decode(u["ko"])
-            if jp.count("\n") != ko.count("\n"):
-                skipped += 1                    # 줄 구조 어긋남 → 안전하게 건너뜀
-                continue
-            fixed = deepl._restore_indent(jp, ko)
+            fixed = ko
+            if jp.count("\n") == ko.count("\n"):
+                fixed = deepl._restore_indent(jp, fixed)   # 줄 구조 같을 때만 들여쓰기 복원
+            else:
+                skipped += 1
+            fixed = deepl._restore_vars(jp, fixed)         # $...$ 변수는 줄 구조와 무관하게 복원
             if fixed != ko:
                 changed += 1
                 if not args.dry_run:
                     u["ko"] = textcodec.encode(fixed)
 
-    print(f"free·ko 유닛 {total}개 · 복구 대상 {changed}개 · 줄구조 불일치 제외 {skipped}개")
+    print(f"free·ko 유닛 {total}개 · 복구 대상 {changed}개 · 들여쓰기 보류(줄구조 불일치) {skipped}개")
     if args.dry_run:
         return
     if not changed:

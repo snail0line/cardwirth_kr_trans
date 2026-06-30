@@ -112,6 +112,28 @@ def _restore_brackets(src: str, dst: str) -> str:
 # 줄머리의 (제어코드*)(공백*) 를 분리. 제어코드 = & 또는 # + 영숫자 1글자(색·치환코드).
 _LEAD = re.compile(r"^((?:[&#][0-9A-Za-z])*)([ \t　]*)(.*)$")
 
+# CardWirth 변수 참조: $...$ (예: $PC\一人称$). 안쪽은 식별자라 절대 번역하면 안 됨.
+_VAR = re.compile(r"\$[^$\n]*\$")
+
+
+def _restore_vars(src: str, dst: str) -> str:
+    """DeepL 이 $...$ 변수 참조(예: $PC\\一人称$) 안의 일본어를 번역해 깨뜨리는 걸 복원한다.
+
+    $PC\\一人称$ → $PC\\1인칭$ 처럼 안쪽이 번역되면 게임이 변수를 못 찾아 글이 깨진다.
+    DeepL 은 $ 구분자와 그 개수·순서는 보존하므로, 원문의 $...$ 들을 순서대로
+    번역문의 $...$ 자리에 그대로 되돌린다(개수가 같을 때만 — 다르면 매핑 불가라 보류)."""
+    src_vars = _VAR.findall(src)
+    if not src_vars:
+        return dst
+    dst_hits = list(_VAR.finditer(dst))
+    if len(dst_hits) != len(src_vars):
+        return dst
+    out, last = [], 0
+    for span, m in zip(src_vars, dst_hits):
+        out.append(dst[last:m.start()]); out.append(span); last = m.end()
+    out.append(dst[last:])
+    return "".join(out)
+
 
 def _restore_indent(src: str, dst: str) -> str:
     """DeepL 이 줄머리 전각공백(U+3000) 들여쓰기를 일반공백으로 바꾸거나 지우는 걸
@@ -149,7 +171,10 @@ def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "a
         if len(res) != len(chunk):
             raise DeepLError(f"응답 개수 불일치: 요청 {len(chunk)} vs 응답 {len(res)}")
         for src, dst in zip(chunk, res):
-            out[src] = _restore_indent(src, _restore_brackets(src, dst))
+            dst = _restore_brackets(src, dst)
+            dst = _restore_indent(src, dst)
+            dst = _restore_vars(src, dst)
+            out[src] = dst
         if progress:
             progress(min(s + BATCH, len(uniq)), len(uniq))
     return out
