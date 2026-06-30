@@ -2,10 +2,11 @@
 body {
   margin: 0; font-family: "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
   color: #111827; background: #f9fafb; font-size: 14px;
+  height: 100vh; display: flex; flex-direction: column; overflow: hidden;
 }
 button {
   font: inherit; cursor: pointer; border: 1px solid #d1d5db; background: #fff;
-  border-radius: 6px; padding: 6px 12px; color: #374151;
+  border-radius: 6px; padding: 6px 12px; color: #374151; white-space: nowrap;
 }
 button:hover { background: #f3f4f6; }
 button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
@@ -16,17 +17,21 @@ input[type=text] {
 
 /* topbar */
 .topbar {
-  display: flex; align-items: center; gap: 14px; padding: 10px 16px;
-  background: #fff; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
+  padding: 10px 16px; background: #fff; border-bottom: 1px solid #e5e7eb;
+  flex: 0 0 auto; z-index: 10;
 }
 .brand { font-weight: 800; font-size: 16px; letter-spacing: -0.3px; white-space: nowrap; }
-.openbar { display: flex; gap: 6px; flex: 1; min-width: 280px; }
+.openbar { display: flex; gap: 6px; flex: 1 1 240px; min-width: 220px; }
 .openbar input { flex: 1; }
 .progress { font-size: 13px; color: #6b7280; white-space: nowrap; }
-.actions { display: flex; gap: 8px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.topbar button { padding: 6px 11px; }
+/* 좁은 화면에서 브랜드는 줄어들지 않게, 입력칸이 먼저 줄어들게 */
+.brand { flex: 0 0 auto; }
 
 /* layout */
-.layout { display: flex; height: calc(100vh - 57px); }
+.layout { display: flex; flex: 1 1 auto; min-height: 0; }
 .sidebar { width: 280px; border-right: 1px solid #e5e7eb; background: #fff; display: flex; flex-direction: column; }
 .sidehead { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; font-weight: 700; color: #374151; }
 .sidehead .cnt { color: #9ca3af; font-weight: 400; font-size: 12px; }
