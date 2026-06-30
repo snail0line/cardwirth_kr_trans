@@ -10,6 +10,7 @@ DeepL 자동 번역 — 키 저장/로드 + 일괄 번역 + 시나리오 초안 
 from __future__ import annotations
 import json
 import os
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -108,6 +109,31 @@ def _restore_brackets(src: str, dst: str) -> str:
     return dst
 
 
+# 줄머리의 (제어코드*)(공백*) 를 분리. 제어코드 = & 또는 # + 영숫자 1글자(색·치환코드).
+_LEAD = re.compile(r"^((?:[&#][0-9A-Za-z])*)([ \t　]*)(.*)$")
+
+
+def _restore_indent(src: str, dst: str) -> str:
+    """DeepL 이 줄머리 전각공백(U+3000) 들여쓰기를 일반공백으로 바꾸거나 지우는 걸
+    원문 기준으로 복원한다.
+
+    CardWirth 메시지는 각 줄을 전각공백으로 들여쓰는데, DeepL 은 맨 첫 줄을 빼면
+    줄머리 U+3000 을 반각공백으로 normalize 하거나 아예 삭제해 레이아웃이 깨진다.
+    preserve_formatting 으로 개행 구조(개행 수)는 보존되므로, 개행 수가 같을 때만
+    줄 단위로 원문의 줄머리 공백을 그대로 옮긴다(제어코드는 번역문 것을 유지)."""
+    if src.count("\n") != dst.count("\n"):
+        return dst                      # 줄 구조가 어긋나면 위치 정렬이 깨지므로 손대지 않음
+    out = []
+    for s_line, d_line in zip(src.split("\n"), dst.split("\n")):
+        s_ws = _LEAD.match(s_line).group(2)
+        if "　" not in s_ws:            # 원문 줄머리에 전각 들여쓰기가 없으면 그대로 둠
+            out.append(d_line)
+            continue
+        d_codes, _d_ws, d_rest = _LEAD.match(d_line).groups()
+        out.append(d_codes + s_ws + d_rest)
+    return "\n".join(out)
+
+
 def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "auto",
                     progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, str]:
     """텍스트 목록 JA→KO 번역. 중복 제거 후 한 번씩만 호출. 반환: {원문: 번역}."""
@@ -123,7 +149,7 @@ def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "a
         if len(res) != len(chunk):
             raise DeepLError(f"응답 개수 불일치: 요청 {len(chunk)} vs 응답 {len(res)}")
         for src, dst in zip(chunk, res):
-            out[src] = _restore_brackets(src, dst)
+            out[src] = _restore_indent(src, _restore_brackets(src, dst))
         if progress:
             progress(min(s + BATCH, len(uniq)), len(uniq))
     return out
