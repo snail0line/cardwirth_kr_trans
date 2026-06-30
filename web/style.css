@@ -224,6 +224,22 @@ input[type=text] {
 .flowchart .node { cursor: pointer; }
 .flowchart svg { max-width: none; }
 
+/* 검색 (원문/번역) */
+.search-box { width: 90vw; max-width: 860px; height: 82vh; }
+.search-bar { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+.search-bar input { flex: 1; }
+.search-bar select { flex: 0 0 130px; }
+.search-results { overflow-y: auto; flex: 1; padding: 8px 16px; }
+.search-count { font-size: 12px; color: #6b7280; padding: 4px 0 8px; }
+.sr-row { padding: 8px 10px; border-bottom: 1px solid #f3f4f6; cursor: pointer; border-radius: 6px; }
+.sr-row:hover { background: #eff6ff; }
+.sr-meta { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.sr-file { font-size: 11px; color: #2563eb; font-weight: 600; }
+.sr-jp { font-size: 13px; color: #374151; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-ko { font-size: 13px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-ko.sr-empty { color: #9ca3af; font-style: italic; }
+.search-results mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0 1px; }
+
 /* DeepL 자동 번역 초안 */
 .deepl-box { width: 560px; max-width: 92vw; }
 .deepl-body { padding: 16px 18px; overflow-y: auto; }

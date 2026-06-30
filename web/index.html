@@ -16,6 +16,7 @@
   </div>
   <div class="progress" id="progress">—</div>
   <div class="actions">
+    <button id="btnSearch" title="원문/번역으로 검색">🔍 검색</button>
     <button id="btnFlow">🗺 흐름</button>
     <button id="btnTerms">📖 용어집</button>
     <button id="btnDeepl" title="DeepL 로 번역 초안 자동 생성">🌐 DeepL 초안</button>
@@ -89,6 +90,25 @@
       <span class="pk-hint">📍 위치를 눌러 펼치면 어느 파일·문장에 있는지 보이고, 클릭하면 이동합니다.</span>
       <button id="btnApplyTerms" class="primary">반복 용어로 초안 생성</button>
     </div>
+  </div>
+</div>
+
+<div id="search" class="modal" style="display:none">
+  <div class="modal-box search-box">
+    <div class="modal-head">
+      <span>검색 — 원문/번역으로 찾기 (결과 클릭 → 그 문장으로 이동)</span>
+      <button id="searchClose" class="x">✕</button>
+    </div>
+    <div class="search-bar">
+      <input id="searchQ" type="text" placeholder="일본어 원문 또는 한국어 번역 검색" />
+      <select id="searchScope">
+        <option value="both">원문+번역</option>
+        <option value="jp">원문(JP)만</option>
+        <option value="ko">번역(KO)만</option>
+      </select>
+      <button id="searchGo" class="primary">검색</button>
+    </div>
+    <div id="searchResults" class="search-results"></div>
   </div>
 </div>
 

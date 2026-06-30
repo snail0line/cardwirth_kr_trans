@@ -12,7 +12,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl
+from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 HOST, PORT = "127.0.0.1", 8765
@@ -181,6 +181,13 @@ class Handler(BaseHTTPRequestHandler):
                 d["ko"] = textcodec.decode(un.get("ko", ""))
                 units.append(d)
             return self._json({"rel": rel, "units": units})
+        if u.path == "/api/search":
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            query = q.get("q", [""])[0]
+            scope = q.get("scope", ["both"])[0]
+            return self._json({"results": search.search_units(p, query, scope)})
         if u.path == "/api/outline":
             import xml.etree.ElementTree as ET
             p = STATE["proj"]; rel = q.get("rel", [""])[0]

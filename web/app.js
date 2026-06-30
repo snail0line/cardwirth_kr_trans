@@ -363,11 +363,16 @@ async function jumpTo(rel, sid) {
   await openFile(rel);
   setTimeout(() => {
     const el = $("#units").querySelector(`.unit[data-sid="${sid}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("flash");
-      setTimeout(() => el.classList.remove("flash"), 1600);
+    if (!el) return;
+    // 접힌 말투 그룹 안의 문장이면 그룹을 펼쳐 보이게 한다
+    const body = el.closest(".tg-body");
+    if (body && body.style.display === "none") {
+      const headEl = body.parentElement.querySelector(".tg-head");
+      if (headEl) headEl.click();
     }
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("flash");
+    setTimeout(() => el.classList.remove("flash"), 1600);
   }, 60);
 }
 
@@ -387,6 +392,54 @@ async function applyTerms() {
   toast(`${r.drafted}개 대사에 용어 초안 적용`);
   if (r.stats) renderProgress(r.stats);
   if (STATE.curRel) openFile(STATE.curRel);
+}
+
+// ── 검색 (원문/번역) ──
+function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function hl(text, q) {
+  const safe = esc(text);
+  if (!q) return safe;
+  try { return safe.replace(new RegExp("(" + escRe(esc(q)) + ")", "ig"), "<mark>$1</mark>"); }
+  catch (e) { return safe; }
+}
+const SR_CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "제목", desc: "설명", sysname: "내부명" };
+async function showSearch() {
+  if (!STATE.open) return toast("먼저 시나리오를 여세요");
+  $("#search").style.display = "flex";
+  $("#searchQ").focus(); $("#searchQ").select();
+}
+function closeSearch() { $("#search").style.display = "none"; }
+async function runSearch() {
+  const q = $("#searchQ").value.trim();
+  const scope = $("#searchScope").value;
+  const box = $("#searchResults");
+  if (!q) { box.innerHTML = `<div class="empty">검색어를 입력하세요</div>`; return; }
+  box.innerHTML = `<div class="empty">검색 중…</div>`;
+  const r = await api(`/api/search?q=${encodeURIComponent(q)}&scope=${encodeURIComponent(scope)}`);
+  if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+  renderSearchResults(r.results || [], q);
+}
+function renderSearchResults(list, q) {
+  const box = $("#searchResults");
+  box.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "search-count";
+  head.textContent = list.length ? `${list.length}건${list.length >= 300 ? "+ (상한)" : ""}` : "결과 없음";
+  box.appendChild(head);
+  list.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "sr-row";
+    const file = m.rel.split(/[\\/]/).pop();
+    const cat = m.cat ? `<span class="badge cat-${m.cat}">${SR_CAT[m.cat] || m.cat}</span>` : "";
+    const spk = m.speaker ? `<span class="badge spk">🗣 ${esc(m.speaker)}</span>` : "";
+    const jpLine = m.jp ? `<div class="sr-jp">${m.in_jp ? hl(m.jp, q) : esc(m.jp)}</div>` : "";
+    const koLine = m.ko
+      ? `<div class="sr-ko">${m.in_ko ? hl(m.ko, q) : esc(m.ko)}</div>`
+      : `<div class="sr-ko sr-empty">(미번역)</div>`;
+    row.innerHTML = `<div class="sr-meta"><span class="sr-file" title="${esc(m.rel)}">${esc(file)}</span>${cat}${spk}</div>${jpLine}${koLine}`;
+    row.onclick = () => { closeSearch(); jumpTo(m.rel, m.sid); };
+    box.appendChild(row);
+  });
 }
 
 // ── DeepL 자동 번역 초안 ──
@@ -535,6 +588,12 @@ async function bulkImport() {
 }
 $("#btnBulkOut").onclick = bulkExport;
 $("#btnBulkIn").onclick = bulkImport;
+$("#btnSearch").onclick = showSearch;
+$("#searchClose").onclick = closeSearch;
+$("#searchGo").onclick = runSearch;
+$("#searchQ").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
+$("#searchScope").onchange = runSearch;
+$("#search").addEventListener("click", (e) => { if (e.target.id === "search") closeSearch(); });
 $("#btnFlow").onclick = showFlow;
 $("#btnTerms").onclick = showTerms;
 $("#btnDeepl").onclick = showDeepl;
