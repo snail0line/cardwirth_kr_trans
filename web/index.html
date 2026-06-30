@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CardWirth 한글화 에디터</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">CardWirth 한글화</div>
+  <div class="openbar">
+    <input id="scenDir" type="text" placeholder="시나리오 폴더 또는 .wsn 파일 경로 입력 후 Enter" />
+    <button id="btnOpen" title="시나리오 XML 폴더 선택">📁 폴더</button>
+    <button id="btnOpenWsn" title=".wsn 패키지 파일 선택">📦 .wsn</button>
+  </div>
+  <div class="progress" id="progress">—</div>
+  <div class="actions">
+    <button id="btnFlow">🗺 흐름</button>
+    <button id="btnTerms">📖 용어집</button>
+    <button id="btnDeepl" title="DeepL 로 번역 초안 자동 생성">🌐 DeepL 초안</button>
+    <button id="btnBulkOut" title="모든 일본어 텍스트를 CSV로 내보내기(번역기용)">⬇ CSV 내보내기</button>
+    <button id="btnBulkIn" title="번역된 CSV를 다시 가져오기">⬆ CSV 가져오기</button>
+    <button id="btnSave">저장</button>
+    <button id="btnExport" class="primary">한글 시나리오 내보내기</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="sidebar">
+    <div class="sidehead">
+      파일 <span id="fileCount" class="cnt"></span>
+      <label class="sidehead-opt"><input type="checkbox" id="hideEmpty" checked /> 내용 있는 것만</label>
+    </div>
+    <div id="fileList" class="filelist"></div>
+  </aside>
+
+  <section class="content">
+    <div id="viewTitle" class="viewtitle">시나리오 폴더를 열어주세요.</div>
+    <div class="filterbar" id="filterbar" style="display:none">
+      <span class="viewtabs">
+        <button id="viewList" class="viewtab active">번역 목록</button>
+        <button id="viewFlow" class="viewtab">흐름 보기</button>
+      </span>
+      <label><input type="checkbox" id="hideDone" /> 완료 숨기기</label>
+      <label><input type="checkbox" id="hideControl" checked /> 제어기호 숨기기</label>
+    </div>
+    <div id="units" class="units"></div>
+  </section>
+</main>
+
+<div id="flow" class="modal" style="display:none">
+  <div class="modal-box flow-box">
+    <div class="modal-head">
+      <span>스토리 흐름 (노드 클릭 → 그 씬 번역으로 이동)</span>
+      <label class="flow-opt"><input type="checkbox" id="flowAll" /> 로직 노드 포함</label>
+      <button id="flowClose" class="x">✕</button>
+    </div>
+    <div id="flowChart" class="flowchart"></div>
+  </div>
+</div>
+
+<div id="terms" class="modal" style="display:none">
+  <div class="modal-box terms-box">
+    <div class="modal-head">
+      <span>용어집 — 반복 선택지/단어 일괄 번역 (자유 텍스트만)</span>
+      <button id="termsClose" class="x">✕</button>
+    </div>
+    <div class="terms-addbar">
+      <input id="termAddJp" type="text" placeholder="일본어 단어/문장 직접 추가" />
+      <input id="termAddKo" type="text" placeholder="번역(선택)" />
+      <button id="termAdd" class="primary">+ 추가</button>
+    </div>
+    <div class="terms-body2">
+      <section class="terms-sec">
+        <h3>📌 수동 추가 <span class="hint">직접 추가한 단어/문장 · 위치 추적</span></h3>
+        <div id="termsManual" class="terms-list"></div>
+      </section>
+      <section class="terms-sec">
+        <h3>반복 선택지·텍스트 <span class="hint">동일 문구 2회+ · 번역 시 전부 일괄 적용</span></h3>
+        <div id="termsExact" class="terms-list"></div>
+      </section>
+      <section class="terms-sec">
+        <h3>반복 용어 <span class="hint">반복 단어·캐릭터명 · 초안에 치환 적용</span></h3>
+        <div id="termsWord" class="terms-list"></div>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <span class="pk-hint">📍 위치를 눌러 펼치면 어느 파일·문장에 있는지 보이고, 클릭하면 이동합니다.</span>
+      <button id="btnApplyTerms" class="primary">반복 용어로 초안 생성</button>
+    </div>
+  </div>
+</div>
+
+<div id="deepl" class="modal" style="display:none">
+  <div class="modal-box deepl-box">
+    <div class="modal-head">
+      <span>DeepL 자동 번역 초안</span>
+      <button id="deeplClose" class="x">✕</button>
+    </div>
+    <div class="deepl-body">
+      <section class="deepl-sec">
+        <h3>API 키 <span id="deeplKeyStat" class="hint"></span></h3>
+        <div class="deepl-keybar">
+          <input id="deeplKey" type="password" placeholder="DeepL API 키 입력 (한 번만 저장하면 됨)" />
+          <button id="deeplKeySave" class="primary">저장</button>
+        </div>
+        <p class="hint">키는 이 PC의 <code>tools/.deepl_key</code> 에만 저장되고 깃에 올라가지 않습니다. 무료 키(<code>:fx</code>)는 자동 인식됩니다.</p>
+        <div id="deeplUsage" class="deepl-usage"></div>
+      </section>
+      <section class="deepl-sec">
+        <h3>초안 생성</h3>
+        <label class="deepl-opt"><input type="checkbox" id="deeplOverwrite" /> 이미 번역된 칸도 다시 번역(덮어쓰기)</label>
+        <p class="hint">기본은 빈 칸만 채웁니다. 제어기호·내부명은 건너뜁니다. 동일 문장은 한 번만 번역(쿼터 절약).</p>
+        <div class="deepl-actions">
+          <button id="deeplDraftFile">📄 현재 파일만</button>
+          <button id="deeplDraftAll" class="primary">📚 전체 시나리오</button>
+        </div>
+        <div id="deeplResult" class="deepl-result"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/static/mermaid.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+projects/
+_export_test/
+*.log
+*deepl_key*
+
+# 제3자 시나리오(저작권) — 배포물에 포함하지 않음
+test_scenario/
+
+# 개발용(유저가 실행할 필요 없음) — 로컬에만 보관
+tests/
+spike/
+ANALYSIS.md
+PLAN.md
+SPIKE_FINDINGS.md
