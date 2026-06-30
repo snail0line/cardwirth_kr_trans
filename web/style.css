@@ -132,6 +132,9 @@ input[type=text] {
 .tg-rep { color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .tg-body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-top: 1px solid #e5e7eb; }
 .tg-body .unit { border-color: #f3f4f6; }
+.unit-bar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.unit-reset { padding: 2px 8px; font-size: 11px; line-height: 1.4; color: #6b7280; }
+.unit-reset:hover { background: #f3f4f6; color: #374151; }
 .unit textarea {
   font: inherit; width: 100%; min-height: 60px; resize: vertical; line-height: 1.55;
   border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; color: #111827;

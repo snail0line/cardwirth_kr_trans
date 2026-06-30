@@ -294,10 +294,9 @@ function freeUnitEl(rel, u, skipAlt) {
   // 원문을 미리 넣어 둔다 → 줄바꿈/띄어쓰기 그대로 두고 일본어만 한국어로 고쳐 쓰기
   ta.value = u.ko || u.jp;
   ta.placeholder = "여기에서 일본어만 한국어로 고쳐 쓰세요";
-  ta.onblur = async () => {
-    let val = ta.value;
-    if (val === "") { val = u.jp; ta.value = u.jp; }   // 비우면 원문 복원
-    const newKo = (val === u.jp) ? "" : val;           // 원문 그대로면 미번역으로 취급
+
+  // ko 변경을 서버에 반영 (onblur·되돌리기 공용)
+  const commit = async (newKo) => {
     if (newKo === (u.ko || "")) return;
     u.ko = newKo;
     el.classList.toggle("done", !!u.ko);
@@ -305,6 +304,29 @@ function freeUnitEl(rel, u, skipAlt) {
     renderProgress(res.stats);
     api("/api/state").then((s) => { STATE.files = s.files || []; renderFileList(); });
   };
+
+  ta.onblur = () => {
+    let val = ta.value;
+    if (val === "") { val = u.jp; ta.value = u.jp; }   // 비우면 원문 복원
+    commit(val === u.jp ? "" : val);                   // 원문 그대로면 미번역으로 취급
+  };
+
+  // 메시지별 "원문으로 되돌리기" — 초안/번역을 버리고 원문(jp)으로 리셋해 재번역 대상으로
+  const bar = document.createElement("div");
+  bar.className = "unit-bar";
+  const reset = document.createElement("button");
+  reset.type = "button";
+  reset.className = "unit-reset";
+  reset.textContent = "↺ 원문으로";
+  reset.title = "이 메시지의 번역/초안을 버리고 원문으로 되돌립니다 (재번역 대상이 됩니다)";
+  reset.onclick = () => {
+    if (u.ko && !confirm("이 메시지를 원문으로 되돌릴까요?\n현재 번역/초안은 사라집니다.")) return;
+    ta.value = u.jp;
+    commit("");
+  };
+  bar.appendChild(reset);
+
+  right.appendChild(bar);
   right.appendChild(ta);
   el.appendChild(left); el.appendChild(right);
   return el;
