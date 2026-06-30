@@ -41,11 +41,37 @@ async function refreshState() {
   STATE.files = s.files || [];
   STATE.srcWsn = s.src_wsn || null;
   renderProgress(s.stats);
+  if (s.version && $("#appVer")) $("#appVer").textContent = " v" + s.version;
   if (s.open) {
     $("#scenDir").value = s.src_wsn || s.scenario_dir;
     $("#filterbar").style.display = "flex";
   }
   renderFileList();
+}
+
+// ── 자동 업데이트 ──
+async function checkUpdate() {
+  try {
+    const r = await api("/api/update_check");
+    if (r && r.behind && r.latest) {
+      $("#updateMsg").textContent = `🆕 새 버전 v${r.latest} 가 나왔어요 (현재 v${r.current})`;
+      $("#updateBtn").disabled = false;
+      $("#updateBar").style.display = "flex";
+    }
+  } catch (e) { /* 오프라인 등 — 조용히 무시 */ }
+}
+async function applyUpdate() {
+  if (!confirm("최신 버전으로 업데이트할까요?\n코드 파일만 교체되고 번역 진행상황·DeepL 키·시나리오는 그대로 유지됩니다.\n완료 후 서버가 자동 재시작됩니다.")) return;
+  $("#updateBtn").disabled = true;
+  $("#updateMsg").textContent = "업데이트 중… (다운로드·교체, 수십 초)";
+  const r = await post("/api/update_apply");
+  if (r.error) {
+    $("#updateMsg").textContent = "업데이트 오류: " + r.error;
+    $("#updateBtn").disabled = false;
+    return;
+  }
+  $("#updateMsg").textContent = `✅ v${r.updated_to} 로 업데이트됨 (파일 ${r.files}개) · 서버 재시작 중… 잠시 후 자동 새로고침`;
+  setTimeout(() => location.reload(), 4500);
 }
 
 // ── 네이티브 Windows 선택 다이얼로그 (폴더 / .wsn 파일) ──
@@ -617,5 +643,8 @@ $("#viewFlow").onclick = () => setView("flow");
 $("#hideEmpty").onchange = renderFileList;
 $("#hideDone").onchange = () => STATE.curRel && openFile(STATE.curRel);
 $("#hideControl").onchange = () => STATE.curRel && openFile(STATE.curRel);
+$("#updateBtn").onclick = applyUpdate;
+$("#updateDismiss").onclick = () => ($("#updateBar").style.display = "none");
 
 refreshState();
+checkUpdate();

@@ -22,6 +22,15 @@ input[type=text] {
   flex: 0 0 auto; z-index: 10;
 }
 .brand { font-weight: 800; font-size: 16px; letter-spacing: -0.3px; white-space: nowrap; }
+.brandver { font-weight: 400; font-size: 11px; color: #9ca3af; margin-left: 5px; }
+/* 업데이트 배너 */
+.updatebar {
+  display: flex; align-items: center; gap: 12px; padding: 8px 16px;
+  background: #eff6ff; border-bottom: 1px solid #bfdbfe; color: #1d4ed8;
+  font-size: 13px; flex: 0 0 auto;
+}
+.updatebar button.primary { padding: 4px 14px; }
+.updatebar-x { margin-left: auto; border: none; background: none; color: #6b7280; padding: 2px 6px; }
 .openbar { display: flex; gap: 6px; flex: 1 1 240px; min-width: 220px; }
 .openbar input { flex: 1; }
 .progress { font-size: 13px; color: #6b7280; white-space: nowrap; }

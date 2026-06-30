@@ -8,7 +8,7 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">CardWirth 한글화</div>
+  <div class="brand">CardWirth 한글화<span id="appVer" class="brandver"></span></div>
   <div class="openbar">
     <input id="scenDir" type="text" placeholder="시나리오 폴더 또는 .wsn 파일 경로 입력 후 Enter" />
     <button id="btnOpen" title="시나리오 XML 폴더 선택">📁 폴더</button>
@@ -26,6 +26,12 @@
     <button id="btnExport" class="primary" title="번역 적용된 한글 시나리오 산출">📤 한글 시나리오 내보내기</button>
   </div>
 </header>
+
+<div id="updateBar" class="updatebar" style="display:none">
+  <span id="updateMsg"></span>
+  <button id="updateBtn" class="primary">업데이트</button>
+  <button id="updateDismiss" class="updatebar-x" title="닫기">✕</button>
+</div>
 
 <main class="layout">
   <aside class="sidebar">

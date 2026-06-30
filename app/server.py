@@ -12,7 +12,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search
+from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search, update
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 HOST, PORT = "127.0.0.1", 8765
@@ -166,6 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                 "stats": _stats(),
                 "files": _file_summaries(),
                 "deepl": deepl.key_status(),
+                "version": update.local_version(),
             })
         if u.path == "/api/file":
             p = STATE["proj"]; rel = q.get("rel", [""])[0]
@@ -217,6 +218,9 @@ class Handler(BaseHTTPRequestHandler):
             f = flow.build_flow(p["scenario_dir"], content_rels=content_rels)
             # 패키지 호출(Call type=Package) 엣지로 Area↔Package 실제 흐름을 그린다
             return self._json(flow.to_mermaid(f))
+
+        if u.path == "/api/update_check":
+            return self._json(update.check())
 
         if u.path == "/api/deepl_usage":
             try:
@@ -385,6 +389,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 500)
             project.save(p)
             return self._json({"ok": True, "result": res, "stats": _stats()})
+
+        if u.path == "/api/update_apply":
+            try:
+                res = update.apply()
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
+            # app/*.py 가 바뀌었으면 자동 리로더가 곧 서버를 재시작한다.
+            return self._json({"ok": True, **res})
 
         if u.path == "/api/save":
             if not p:
