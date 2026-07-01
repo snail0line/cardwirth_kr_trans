@@ -75,12 +75,20 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
                     talk = _nearest(ancestors, "Talk")
                     if talk is not None and (talk.get("path") or "").strip():
                         u["img"] = True
-                # 말투 변형 묶기: <Dialog> 안의 자유 텍스트는 같은 <Talk> 끼리 한 그룹
-                # (구조: Talk > Dialogs > Dialog > Text — 중간 Dialogs 래퍼 있음)
+                # 말투 변형 묶기 — 두 가지 구조 지원:
+                # (A) <Talk type="Dialog"> 안 여러 <Dialog> (쿠폰 :○○口調 분기) → 같은 Talk 로 묶기
+                #     (구조: Talk > Dialogs > Dialog > Text — 중간 Dialogs 래퍼 있음)
+                # (B) 口調 분기 <Branch type="MultiStep" step="…口調"> 아래 name=0..N 별도 <Talk> 들
+                #     → 같은 Branch 로 묶기 (각 Talk 가 한 말투)
                 if _nearest(ancestors, "Dialog") is not None:
                     talk = _nearest(ancestors, "Talk")
                     if talk is not None:
                         u["group"] = talk_group.setdefault(id(talk), len(talk_group) + 1)
+                elif slot.tag == "Text":
+                    br = _nearest(ancestors, "Branch")
+                    if br is not None and br.get("type") == "MultiStep" \
+                            and "口調" in (br.get("step") or ""):
+                        u["group"] = talk_group.setdefault(id(br), len(talk_group) + 1)
                 # 분류: 대사 / 나레이션 / 선택지 / 설명 / 제목(label) / 내부명(sysname)
                 if slot.field != "#text":
                     u["cat"] = "choice"
