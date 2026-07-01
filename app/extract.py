@@ -69,6 +69,12 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
                     tone = context.tone_of(ancestors, el)
                     if tone:
                         u["tone"] = tone
+                    # 메시지창에 이미지(화자 그림/사진)가 뜨면 텍스트 폭이 좁아진다
+                    # (게임 자동 줄바꿈: 그림 없음 43단위 → 그림 있으면 33단위).
+                    # 판별 = 부모 <Talk> 의 path 속성이 비어있지 않은지.
+                    talk = _nearest(ancestors, "Talk")
+                    if talk is not None and (talk.get("path") or "").strip():
+                        u["img"] = True
                 # 말투 변형 묶기: <Dialog> 안의 자유 텍스트는 같은 <Talk> 끼리 한 그룹
                 # (구조: Talk > Dialogs > Dialog > Text — 중간 Dialogs 래퍼 있음)
                 if _nearest(ancestors, "Dialog") is not None:

@@ -6,6 +6,39 @@ const post = (path, body) =>
 
 let STATE = { open: false, files: [], curRel: null };
 
+// ── 게임 내 줄바꿈 미리보기 ──
+// CardWirthPy(AtWS) 렌더러는 픽셀이 아니라 strlen 고정 그리드로 줄바꿈한다.
+//   strlen: 반각(ASCII)=1, 전각(한글·일본어·한자·전각기호)=2 (util.get_strlen)
+//   색·제어코드(&X)는 폭 0. 선두 전각공백(들여쓰기)도 포함해서 셈.
+//   한 줄 한계 = 43 단위(일반) / 33 단위(화자 그림 있을 때). 세로 = 창에 약 7줄.
+const LINE_UNITS = 43;      // 일반 메시지 자동 줄바꿈 한계(strlen)
+const LINE_UNITS_IMG = 33;  // 화자 그림/사진 있는 메시지 (그림 폭만큼 좁음, 32+1)
+const WRAP_ROWS = 7;        // 창에 보이는 세로 줄 수(넘으면 잘림/페이지 넘어감)
+
+function charUnits(ch) {
+  const c = ch.codePointAt(0);
+  if (c === 0x3000) return 2;                 // 전각 공백(들여쓰기)
+  if (c <= 0x2ff) return 1;                   // ASCII·라틴 → 반각
+  if (c >= 0xff61 && c <= 0xff9f) return 1;   // 반각 가타카나
+  return 2;                                   // 한글·일본어·한자·전각기호
+}
+
+// 텍스트를 게임처럼 strlen 한계(units)로 접어 줄 배열로 반환. 명시적 \n 은 그대로 유지.
+function wrapForGame(text, units) {
+  text = text.replace(/&[A-Za-z]/g, "");      // 게임에 안 보이는 색·제어코드 제거(폭 0)
+  const out = [];
+  for (const raw of text.split("\n")) {
+    let line = "", w = 0;
+    for (const ch of raw) {
+      const cw = charUnits(ch);
+      if (w + cw > units && line !== "") { out.push(line); line = ""; w = 0; }
+      line += ch; w += cw;
+    }
+    out.push(line);
+  }
+  return out;                                 // 줄 배열
+}
+
 function toast(msg) {
   const t = $("#toast");
   t.textContent = msg; t.classList.add("show");
@@ -282,7 +315,8 @@ function freeUnitEl(rel, u, skipAlt) {
   const conds = condBadges(u.conditions);
   const tone = u.tone ? `<span class="badge tone">말투 ${esc(u.tone)}</span>` : "";
   const ctrl = u.control ? '<span class="badge">제어기호</span>' : "";
-  left.innerHTML = `<div class="meta">${catBadge}${spk}${conds}${tone}${ctrl}</div>
+  const imgB = u.img ? '<span class="badge img" title="그림이 떠서 한 줄 폭이 좁음 (43→33단위)">🖼 그림·33</span>' : "";
+  left.innerHTML = `<div class="meta">${catBadge}${spk}${conds}${tone}${ctrl}${imgB}</div>
     <div class="jp"></div>`;
   if (!skipAlt) {
     const alt = condAltEl(u);
@@ -311,6 +345,31 @@ function freeUnitEl(rel, u, skipAlt) {
     commit(val === u.jp ? "" : val);                   // 원문 그대로면 미번역으로 취급
   };
 
+  // 게임 창 미리보기 — 포커스한 메시지에만, 실제 메시지창처럼 렌더
+  const preview = document.createElement("div");
+  preview.className = "game-preview";
+  const limit = u.img ? LINE_UNITS_IMG : LINE_UNITS;   // 그림 있으면 33, 없으면 43
+  if (u.img) preview.classList.add("gp-img");          // 이미지 폭만큼 본문이 오른쪽에서 시작
+  const refreshPreview = () => {
+    const lines = wrapForGame(ta.value, limit);
+    preview.innerHTML = "";
+    lines.forEach((ln, i) => {
+      if (i === WRAP_ROWS) {                       // 7줄 다음에 잘림선(게임에선 여기까지만 보임)
+        const cut = document.createElement("div");
+        cut.className = "gp-cut";
+        cut.dataset.label = `${WRAP_ROWS}줄 초과`;
+        preview.appendChild(cut);
+      }
+      const d = document.createElement("div");
+      d.className = "gp-line" + (i >= WRAP_ROWS ? " gp-over" : "");
+      d.textContent = ln || " ";              // 빈 줄도 높이 유지
+      preview.appendChild(d);
+    });
+  };
+  ta.addEventListener("input", refreshPreview);
+  ta.addEventListener("focus", () => { refreshPreview(); preview.classList.add("gp-show"); });
+  ta.addEventListener("blur", () => { preview.classList.remove("gp-show"); });
+
   // 메시지별 "원문으로 되돌리기" — 초안/번역을 버리고 원문(jp)으로 리셋해 재번역 대상으로
   const bar = document.createElement("div");
   bar.className = "unit-bar";
@@ -328,6 +387,7 @@ function freeUnitEl(rel, u, skipAlt) {
 
   right.appendChild(bar);
   right.appendChild(ta);
+  right.appendChild(preview);
   el.appendChild(left); el.appendChild(right);
   return el;
 }
