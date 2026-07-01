@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import shutil
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -443,6 +444,7 @@ class Handler(BaseHTTPRequestHandler):
                 tmp = out[:-4] + "_folder"
                 r = repack.repack_project(p, tmp)
                 entries = wsn.pack_wsn(tmp, out)
+                shutil.rmtree(tmp, ignore_errors=True)   # 압축용 임시 폴더 정리(.wsn 만 남김)
                 return self._json({"ok": True, "out_dir": os.path.abspath(out),
                                    "result": r, "wsn": True, "entries": entries})
             r = repack.repack_project(p, out)
