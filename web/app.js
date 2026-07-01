@@ -13,7 +13,7 @@ let STATE = { open: false, files: [], curRel: null };
 //   한 줄 한계 = 43 단위(일반) / 33 단위(화자 그림 있을 때). 세로 = 창에 약 7줄.
 const LINE_UNITS = 43;      // 일반 메시지 자동 줄바꿈 한계(strlen)
 const LINE_UNITS_IMG = 33;  // 화자 그림/사진 있는 메시지 (그림 폭만큼 좁음, 32+1)
-const WRAP_ROWS = 7;        // 창에 보이는 세로 줄 수(넘으면 잘림/페이지 넘어감)
+const WRAP_ROWS = 8;        // 넘침 판정 기준 줄 수(넘으면 잘림/페이지 넘어감)
 // 카드 해설창(CastCard/ItemCard/SkillCard) — cardinfo.py + util.txtwrap mode=1.
 // wx 다이얼로그라 메시지창과 별개: 폭 37단위·9줄·13px, 색코드/7줄컷 없음(있는 그대로 표시).
 const CARD_UNITS = 37;
@@ -705,7 +705,7 @@ function renderOverflowResults(list) {
   head.className = "search-count";
   head.textContent = list.length
     ? `${list.length}건 넘침${list.length >= 500 ? "+ (상한)" : ""}`
-    : "7줄을 넘기는 번역이 없습니다 👍";
+    : `${WRAP_ROWS}줄을 넘기는 번역이 없습니다 👍`;
   box.appendChild(head);
   list.forEach((m) => {
     const row = document.createElement("div");

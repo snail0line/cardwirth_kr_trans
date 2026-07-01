@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""번역문이 게임 메시지창(7줄)을 넘겨 잘리는 대사 목록.
+"""번역문이 게임 메시지창(8줄 기준)을 넘겨 잘리는 대사 목록.
 
 미리보기(web/app.js `wrapForGame`)와 같은 strlen 고정 그리드 계산을 서버에서 재현해
 전 파일(또는 현재 파일)을 스캔한다. 번역(ko)이 있는 메시지창 텍스트(대사/나레이션)만
@@ -14,7 +14,7 @@ from . import textcodec
 
 LINE_UNITS = 43       # 일반 메시지 한 줄 폭(strlen)
 LINE_UNITS_IMG = 33   # 화자 그림/PC 카드가 뜨는 메시지 (그림 폭만큼 좁음)
-WRAP_ROWS = 7         # 메시지창 세로 줄 수(넘으면 잘림/페이지 넘어감)
+WRAP_ROWS = 8         # 넘침 판정 기준 줄 수(넘으면 잘림/페이지 넘어감)
 
 _CTRL = re.compile(r"&[A-Za-z]")        # 색·제어코드(게임에 안 보임, 폭 0)
 _MSG_CATS = ("dialogue", "narration")   # 메시지창에 뜨는 텍스트만 (선택지·설명·제목 제외)
@@ -53,7 +53,7 @@ def wrap_rows(text: str, units: int) -> int:
 
 def find_overflow(proj: Dict[str, Any], scope: str = "all",
                   cur_rel: str = "", cap: int = 500) -> List[dict]:
-    """7줄을 넘겨 잘리는 번역 대사 목록. scope: 'all'|'file'(cur_rel 만).
+    """8줄을 넘겨 잘리는 번역 대사 목록. scope: 'all'|'file'(cur_rel 만).
     반환: [{rel,sid,cat,speaker,rows,over,img,ko}] — 넘침 큰 순."""
     out: List[dict] = []
     for rel, f in proj["files"].items():
