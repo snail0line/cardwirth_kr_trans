@@ -13,7 +13,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search, overflow, update
+from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search, overflow, dupchoice, update
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 HOST, PORT = "127.0.0.1", 8765
@@ -208,6 +208,13 @@ class Handler(BaseHTTPRequestHandler):
             scope = q.get("scope", ["all"])[0]
             cur_rel = q.get("rel", [""])[0]
             return self._json({"results": overflow.find_overflow(p, scope, cur_rel)})
+        if u.path == "/api/dup_choices":
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            scope = q.get("scope", ["all"])[0]
+            cur_rel = q.get("rel", [""])[0]
+            return self._json({"results": dupchoice.find_dup_choices(p, scope, cur_rel)})
         if u.path == "/api/outline":
             import xml.etree.ElementTree as ET
             p = STATE["proj"]; rel = q.get("rel", [""])[0]

@@ -17,7 +17,7 @@
   <div class="progress" id="progress">—</div>
   <div class="actions">
     <button id="btnSearch" title="원문/번역으로 검색">🔍 검색</button>
-    <button id="btnOverflow" title="번역이 8줄을 넘겨 게임에서 잘리는 대사 찾기">⚠ 넘침</button>
+    <button id="btnOverflow" title="선택지 중복번역 + 메시지창 넘침(8줄 초과) 찾기">⚠ 경고</button>
     <button id="btnFlow">🔀 흐름</button>
     <button id="btnTerms">📖 용어집</button>
     <button id="btnDeepl" title="DeepL 로 번역 초안 자동 생성">🌐 DeepL 초안</button>
@@ -122,7 +122,7 @@
 <div id="overflow" class="modal" style="display:none">
   <div class="modal-box search-box">
     <div class="modal-head">
-      <span>넘침 목록 — 번역이 8줄을 넘겨 게임에서 잘리는 대사 (결과 클릭 → 그 문장으로 이동)</span>
+      <span>경고 목록 — ①넘침(8줄 초과로 잘림) ②선택지 중복번역(같은 메뉴에 같은 한국어) (클릭 → 그 문장으로 이동)</span>
       <button id="overflowClose" class="x">✕</button>
     </div>
     <div class="search-bar">
@@ -133,6 +133,9 @@
       <button id="overflowGo" class="primary">다시 스캔</button>
       <button id="overflowTidy" title="넘치는 대사들의 문단 안 수동 줄바꿈을 없애 8줄 넘침을 줄입니다 (문단 빈 줄 유지, 끝 빈 줄 제거)">⤵ 일괄 정돈</button>
     </div>
+    <div class="warn-section-title">⚠ 선택지 중복번역 — 서로 다른 원문이 같은 한국어라 선택지 구분이 안 됨</div>
+    <div id="dupResults" class="search-results"></div>
+    <div class="warn-section-title">↕ 메시지창 넘침 — 번역이 8줄을 넘겨 게임에서 잘리는 대사</div>
     <div id="overflowResults" class="search-results"></div>
   </div>
 </div>

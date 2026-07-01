@@ -746,15 +746,45 @@ async function bulkTidyOverflow() {
 async function runOverflow() {
   const scope = $("#overflowScope").value;
   const box = $("#overflowResults");
+  const dupBox = $("#dupResults");
   if (scope === "file" && !STATE.curRel) {
     box.innerHTML = `<div class="empty">현재 열린 파일이 없습니다</div>`;
+    dupBox.innerHTML = "";
     return;
   }
   box.innerHTML = `<div class="empty">스캔 중…</div>`;
+  dupBox.innerHTML = `<div class="empty">스캔 중…</div>`;
   const rel = STATE.curRel ? `&rel=${encodeURIComponent(STATE.curRel)}` : "";
+  // 선택지 중복번역 먼저(더 치명적), 그다음 넘침
+  const d = await api(`/api/dup_choices?scope=${encodeURIComponent(scope)}${rel}`);
+  if (d.error) { dupBox.innerHTML = `<div class="empty">${esc(d.error)}</div>`; }
+  else { renderDupChoices(d.results || []); }
   const r = await api(`/api/overflow?scope=${encodeURIComponent(scope)}${rel}`);
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   renderOverflowResults(r.results || []);
+}
+function renderDupChoices(list) {
+  const box = $("#dupResults");
+  box.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "search-count";
+  head.textContent = list.length
+    ? `${list.length}건 중복${list.length >= 500 ? "+ (상한)" : ""}`
+    : `같은 메뉴에 겹치는 선택지 번역이 없습니다 👍`;
+  box.appendChild(head);
+  list.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "sr-row";
+    const file = m.rel.split(/[\\/]/).pop();
+    const items = m.items
+      .map((it) => `<span class="badge spk" title="원문">${esc(it.jp)}</span>`)
+      .join(" ");
+    row.innerHTML = `<div class="sr-meta"><span class="sr-file" title="${esc(m.rel)}">${esc(file)}</span>`
+      + `<span class="badge over">번역 “${esc(m.ko)}” ×${m.count}</span>${items}</div>`
+      + `<div class="sr-ko">원문이 다른데 번역이 같아 선택지 구분 불가 — 클릭해 첫 항목으로 이동</div>`;
+    row.onclick = () => { closeOverflow(); jumpTo(m.rel, m.items[0].sid); };
+    box.appendChild(row);
+  });
 }
 function renderOverflowResults(list) {
   const box = $("#overflowResults");
