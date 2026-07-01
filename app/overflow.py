@@ -51,6 +51,62 @@ def wrap_rows(text: str, units: int) -> int:
     return rows
 
 
+def tidy_text(text: str) -> str:
+    """문단(빈 줄 구분 블록) 안 수동 줄바꿈을 없애 게임 자동 줄바꿈에 맡긴다(app.js tidyText 와 동일).
+    빈 줄 문단 경계는 유지, 이어지는 줄은 앞뒤 공백(전각 포함) 제거 후 한 칸 띄어 이음,
+    끝의 빈 줄(마지막이 엔터)은 제거해 넘침을 완화한다."""
+    out: List[str] = []
+    cur: List[str] = []
+
+    def flush():
+        if not cur:
+            return
+        first = cur[0].rstrip()                       # 첫 줄 들여쓰기 유지, 우측 공백만 제거
+        rest = [ln.strip() for ln in cur[1:]]         # 이어지는 줄은 앞뒤 공백 제거
+        out.append(" ".join([first] + rest))
+        cur.clear()
+
+    for ln in (text or "").split("\n"):
+        if ln.strip() == "":
+            flush()
+            out.append("")
+        else:
+            cur.append(ln)
+    flush()
+    while out and out[-1] == "":
+        out.pop()
+    return "\n".join(out)
+
+
+def tidy_overflow(proj: Dict[str, Any], scope: str = "all", cur_rel: str = "") -> Dict[str, Any]:
+    """넘치는(8줄 초과) 번역 대사를 정돈해 저장 대상 proj 를 갱신. 반환: {tidied, still_over}.
+    실제로 줄 수가 준 유닛만 손대고, 정돈해도 여전히 넘치는 수도 함께 돌려준다."""
+    tidied = 0
+    still_over = 0
+    for rel, f in proj["files"].items():
+        if scope == "file" and rel != cur_rel:
+            continue
+        for u in f["units"]:
+            if u["kind"] != "free" or u.get("control"):
+                continue
+            if u.get("cat") not in _MSG_CATS:
+                continue
+            ko = textcodec.decode_field(u["field"], u.get("ko", ""))
+            if not ko.strip():
+                continue
+            units = LINE_UNITS_IMG if u.get("img") else LINE_UNITS
+            if wrap_rows(ko, units) <= WRAP_ROWS:
+                continue
+            new = tidy_text(ko)
+            if new != ko:
+                u["ko"] = textcodec.encode_field(u["field"], new)
+                tidied += 1
+                ko = new
+            if wrap_rows(ko, units) > WRAP_ROWS:
+                still_over += 1
+    return {"tidied": tidied, "still_over": still_over}
+
+
 def find_overflow(proj: Dict[str, Any], scope: str = "all",
                   cur_rel: str = "", cap: int = 500) -> List[dict]:
     """8줄을 넘겨 잘리는 번역 대사 목록. scope: 'all'|'file'(cur_rel 만).

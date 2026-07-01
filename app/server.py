@@ -359,6 +359,15 @@ class Handler(BaseHTTPRequestHandler):
             n = terms.apply_words_to_drafts(p, only_untranslated=only_unt)
             return self._json({"ok": True, "drafted": n, "stats": _stats()})
 
+        if u.path == "/api/overflow_tidy":
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            scope = data.get("scope", "all")
+            cur_rel = data.get("rel", "")
+            res = overflow.tidy_overflow(p, scope, cur_rel)
+            project.save(p)
+            return self._json({"ok": True, **res, "stats": _stats()})
+
         if u.path == "/api/bulk_export":
             if not p:
                 return self._json({"error": "no project"}, 400)

@@ -101,12 +101,68 @@ def _call(url: str, key: str, texts: List[str]) -> List[str]:
     raise DeepLError(f"재시도 실패: {last}")
 
 
-def _restore_brackets(src: str, dst: str) -> str:
-    """DeepL 이 일본어 대사 괄호 「」 를 “ ”(U+201C/U+201D)로 바꾸므로 되돌린다.
-    원문에 「 또는 」 가 있던 문장에만 적용해 일반 따옴표 오변환을 막는다."""
-    if "「" in src or "」" in src:
-        dst = dst.replace("“", "「").replace("”", "」")
-    return dst
+# 따옴표류: 스마트(“ ” ‘ ’) + 곧은(" ')
+_QALL = "“”‘’\"'"
+# 색상코드: & + 색 글자(r/g/b/y/w/o/p/l/d), 대소문자. get_fontcolour / app.js FONT_COLORS 와 일치.
+_COLOR = re.compile(r"&[rgbywopld]", re.I)
+
+
+def _restore_quotes(src: str, dst: str) -> str:
+    """DeepL 이 원문에 없는 '' \"\" 를 넣거나 대사 괄호 「」『』 를 따옴표로 바꾸는 걸 정규화.
+
+    번역 기조: '원문에 '' \"\" 가 없으면 번역문에도 넣지 않는다'.
+      · 원문에 따옴표류가 이미 있으면 → 손대지 않음(유지).
+      · 원문에 「」/『』 가 있으면 → 그 괄호를 복원(바깥 따옴표쌍→괄호, 안쪽 덧붙은 따옴표 제거).
+      · 원문에 괄호도 따옴표도 없으면 → 번역문의 따옴표류를 전부 제거.
+    (이 프로젝트 일회성 데이터 보정과 동일 규칙. overflow.py 등과 무관.)"""
+    if any(c in _QALL for c in src):            # 원문에 따옴표류 있음 → 유지
+        return dst
+    if not any(c in _QALL for c in dst):
+        return dst
+    bt = ("『", "』") if "『" in src else (("「", "」") if "「" in src else None)
+    if bt is None:                              # 원문에 괄호·따옴표 전무 → 따옴표 제거
+        return "".join(c for c in dst if c not in _QALL)
+    if any(c in "「『" for c in dst):            # 번역문에 괄호가 이미 있음 → 덧붙은 따옴표만 제거
+        return "".join(c for c in dst if c not in _QALL)
+    idxs = [i for i, c in enumerate(dst) if c in _QALL]
+    if len(idxs) < 2:
+        return "".join(c for c in dst if c not in _QALL)
+    first, last = idxs[0], idxs[-1]             # 바깥쌍=원문 괄호, 그 사이 따옴표=제거
+    res = []
+    for i, c in enumerate(dst):
+        if i == first:
+            res.append(bt[0])
+        elif i == last:
+            res.append(bt[1])
+        elif c in _QALL:
+            continue
+        else:
+            res.append(c)
+    return "".join(res)
+
+
+def _restore_color_space(src: str, dst: str) -> str:
+    """색상코드(&X) 바로 뒤의 반각공백을 원문 기준으로 정렬한다.
+
+    DeepL 이 `&B大通り`(공백 없음)를 `&B 대로`처럼 색상코드 뒤에 공백을 끼워 글자 배치를
+    어긋나게 하는 걸 막는다. 원문에도 그 자리에 공백이 있으면(원작자 의도) 그대로 둔다.
+    색상코드 순서로 정렬 비교하고, 개수가 어긋나면(매핑 불가) 손대지 않는다."""
+    jf = [src[m.end():m.end() + 1] == " " for m in _COLOR.finditer(src)]
+    km = list(_COLOR.finditer(dst))
+    if not any(dst[m.end():m.end() + 1] == " " for m in km):
+        return dst
+    if len(jf) != len(km):
+        return dst
+    out, last = [], 0
+    for i, m in enumerate(km):
+        out.append(dst[last:m.end()])
+        j = m.end()
+        k = j
+        while k < len(dst) and dst[k] == " ":
+            k += 1
+        last = k if (k > j and not jf[i]) else j   # 원문에 공백 없으면 제거, 있으면 유지
+    out.append(dst[last:])
+    return "".join(out)
 
 
 # 줄머리의 (제어코드*)(공백*) 를 분리. 제어코드 = & 또는 # + 영숫자 1글자(색·치환코드).
@@ -171,9 +227,10 @@ def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "a
         if len(res) != len(chunk):
             raise DeepLError(f"응답 개수 불일치: 요청 {len(chunk)} vs 응답 {len(res)}")
         for src, dst in zip(chunk, res):
-            dst = _restore_brackets(src, dst)
-            dst = _restore_indent(src, dst)
-            dst = _restore_vars(src, dst)
+            dst = _restore_quotes(src, dst)         # 원문에 없는 '' "" 억제 / 「」『』 복원
+            dst = _restore_indent(src, dst)         # 줄머리 전각공백 들여쓰기 복원
+            dst = _restore_vars(src, dst)           # $...$ 변수 참조 원문 복원
+            dst = _restore_color_space(src, dst)    # 색상코드 뒤 덧붙은 반각공백 제거
             out[src] = dst
         if progress:
             progress(min(s + BATCH, len(uniq)), len(uniq))
@@ -213,10 +270,11 @@ def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
                 continue
             if u.get("cat") == "sysname":
                 continue
-            jp = textcodec.decode(u["jp"])
+            # #text 만 CardWirth 이스케이프, 속성(@name 선택지)은 raw — encode_field 대칭
+            jp = textcodec.decode_field(u["field"], u["jp"])
             if not jp.strip():
                 continue
-            ko = textcodec.decode(u.get("ko", ""))
+            ko = textcodec.decode_field(u["field"], u.get("ko", ""))
             if ko and not overwrite:
                 continue
             targets.append((u, jp))
@@ -229,6 +287,6 @@ def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
         dst = trans.get(jp)
         if dst is None:
             continue
-        u["ko"] = textcodec.encode(dst)
+        u["ko"] = textcodec.encode_field(u["field"], dst)   # 속성은 raw 저장(백슬래시 이중화 방지)
         n += 1
     return {"translated": n, "chars": sum(len(j) for j in uniq_jp), "unique": len(uniq_jp)}

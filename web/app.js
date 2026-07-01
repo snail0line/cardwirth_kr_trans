@@ -75,6 +75,30 @@ function wrapPlain(text, units) {
   return out;
 }
 
+// 정돈 — 문단(빈 줄로 구분되는 블록) 안의 수동 줄바꿈을 없애 게임 자동 줄바꿈에 맡긴다.
+// 강제 개행은 줄 수를 늘리기만 하므로, 이어붙이면 세로 줄 수가 최소가 된다(넘침 완화).
+// 규칙: 빈 줄(문단 경계)은 그대로 두고, 한 문단의 이어지는 줄은 앞쪽 들여쓰기(전각공백 포함)를
+// 떼고 한 칸 띄어 이어붙인다. 각 문단 첫 줄의 들여쓰기는 유지한다.
+function tidyText(text) {
+  const out = [];
+  let cur = [];
+  const flush = () => {
+    if (!cur.length) return;
+    const first = cur[0].replace(/\s+$/, "");                 // 첫 줄 들여쓰기 유지, 우측 공백만 제거
+    const rest = cur.slice(1)
+      .map((l) => l.replace(/^\s+/, "").replace(/\s+$/, "")); // 이어지는 줄은 앞뒤 공백 제거
+    out.push([first, ...rest].join(" "));
+    cur = [];
+  };
+  for (const ln of String(text).split("\n")) {
+    if (ln.trim() === "") { flush(); out.push(""); }          // 빈 줄 = 문단 경계 유지
+    else cur.push(ln);
+  }
+  flush();
+  while (out.length && out[out.length - 1] === "") out.pop();  // 끝의 빈 줄(마지막 엔터) 제거 → 넘침 완화
+  return out.join("\n");
+}
+
 // 치환자(변수·이름 코드) — 게임 실행 시 값으로 치환된다(message.py _rpl_specialstr).
 // 에디터엔 그 상태가 없으니 사용자가 값을 넣어 미리볼 수 있게 한다. 값은 세션 전역 공유.
 const SUBST = {};                                        // 토큰 → 대체 텍스트
@@ -407,8 +431,10 @@ function freeUnitEl(rel, u, skipAlt) {
   preview.className = "game-preview";
   const limit = u.img ? LINE_UNITS_IMG : LINE_UNITS;   // 그림 있으면 33, 없으면 43
   if (u.img) preview.classList.add("gp-img");          // 이미지 폭만큼 본문이 오른쪽에서 시작
+  let tidyBtn = null;   // 아래 unit-bar 에서 생성. 넘칠 때만 보이도록 미리보기가 토글.
   const refreshPreview = () => {
     const lines = wrapForGameRuns(applySubst(ta.value), limit);   // 치환자 값 반영해 렌더
+    if (tidyBtn) tidyBtn.style.display = lines.length > WRAP_ROWS ? "" : "none";
     preview.innerHTML = "";
     lines.forEach((runs, i) => {
       if (i === WRAP_ROWS) {                       // 7줄 다음에 잘림선(게임에선 여기까지만 보임)
@@ -511,6 +537,26 @@ function freeUnitEl(rel, u, skipAlt) {
     commit("");
   };
   bar.appendChild(reset);
+
+  // "정돈" — 문단 안 수동 줄바꿈을 없애 8줄 넘침을 완화. 메시지창에서 넘칠 때만 노출.
+  if (isMsg) {
+    tidyBtn = document.createElement("button");
+    tidyBtn.type = "button";
+    tidyBtn.className = "unit-tidy";
+    tidyBtn.textContent = "⤵ 정돈";
+    tidyBtn.title = `문단 안 수동 줄바꿈을 없애 게임 자동 줄바꿈에 맡깁니다 (${WRAP_ROWS}줄 넘침 완화). 빈 줄 문단 구분은 유지됩니다.`;
+    tidyBtn.style.display = "none";
+    tidyBtn.onclick = () => {
+      const next = tidyText(ta.value);
+      if (next === ta.value) { toast("이미 정돈된 상태예요"); return; }
+      ta.value = next;
+      buildSubstBar();
+      refreshPreview();
+      commit(next);
+      toast("정돈했어요 — 게임 자동 줄바꿈 기준으로 이어붙였습니다");
+    };
+    bar.appendChild(tidyBtn);
+  }
 
   right.appendChild(bar);
   right.appendChild(ta);
@@ -685,6 +731,18 @@ async function showOverflow() {
   runOverflow();
 }
 function closeOverflow() { $("#overflow").style.display = "none"; }
+async function bulkTidyOverflow() {
+  const scope = $("#overflowScope").value;
+  if (scope === "file" && !STATE.curRel) return toast("현재 열린 파일이 없습니다");
+  const where = scope === "file" ? "현재 파일의" : "시나리오 전체의";
+  if (!confirm(`${where} 넘치는 대사(8줄 초과)를 정돈합니다.\n문단 안 수동 줄바꿈을 없애 게임 자동 줄바꿈에 맡기고(문단 빈 줄은 유지), 끝의 빈 줄을 제거합니다.\n\n계속할까요?`)) return;
+  const r = await post("/api/overflow_tidy", { scope, rel: STATE.curRel || "" });
+  if (r.error) return toast(r.error);
+  if (r.stats) renderProgress(r.stats);
+  if (STATE.curRel) await openFile(STATE.curRel);   // 현재 파일 뷰 갱신(정돈 반영)
+  runOverflow();
+  toast(`정돈 ${r.tidied}건 · 여전히 넘침 ${r.still_over}건`);
+}
 async function runOverflow() {
   const scope = $("#overflowScope").value;
   const box = $("#overflowResults");
@@ -884,6 +942,7 @@ $("#search").addEventListener("click", (e) => { if (e.target.id === "search") cl
 $("#btnOverflow").onclick = showOverflow;
 $("#overflowClose").onclick = closeOverflow;
 $("#overflowGo").onclick = runOverflow;
+$("#overflowTidy").onclick = bulkTidyOverflow;
 $("#overflowScope").onchange = runOverflow;
 $("#overflow").addEventListener("click", (e) => { if (e.target.id === "overflow") closeOverflow(); });
 $("#btnFlow").onclick = showFlow;
