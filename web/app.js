@@ -844,8 +844,29 @@ async function showDeepl() {
   renderDeeplKeyStat(s.deepl);
   if (s.deepl && s.deepl.set) loadDeeplUsage();
   else $("#deeplUsage").textContent = "";
+  runDeeplCount();
 }
 function closeDeepl() { $("#deepl").style.display = "none"; }
+async function runDeeplCount() {
+  const el = $("#deeplCount");
+  if (!el) return;
+  el.textContent = "번역 분량 계산 중…";
+  const overwrite = $("#deeplOverwrite").checked ? 1 : 0;
+  const rel = STATE.curRel ? `&rel=${encodeURIComponent(STATE.curRel)}` : "";
+  const r = await api(`/api/deepl_count?overwrite=${overwrite}${rel}`);
+  if (r.error) { el.textContent = "분량 계산 실패: " + r.error; return; }
+  const cur = STATE.curRel ? STATE.curRel.split(/[\\/]/).pop() : null;
+  const fmt = (c) => c
+    ? `${c.chars.toLocaleString()}자 (고유 ${c.unique.toLocaleString()}문장${
+        c.chars_raw !== c.chars ? ` · 중복포함 ${c.chars_raw.toLocaleString()}자` : ""})`
+    : "—";
+  const fileLine = r.file
+    ? `📄 현재 파일 (${esc(cur)}): <b>${fmt(r.file)}</b>`
+    : `📄 현재 파일: 열린 파일 없음`;
+  const allLine = `📚 전체 시나리오: <b>${fmt(r.all)}</b>`;
+  const note = overwrite ? "" : `<span class="hint"> · 빈 칸만 기준</span>`;
+  el.innerHTML = `${fileLine}<br>${allLine}${note}`;
+}
 async function saveDeeplKey() {
   const key = $("#deeplKey").value.trim();
   if (!key) return toast("키를 입력하세요");
@@ -872,6 +893,7 @@ async function runDeeplDraft(scope) {
     `완료: ${x.translated}개 초안 생성 (고유 ${x.unique}문장 · ${x.chars.toLocaleString()}자 전송)`;
   renderProgress(r.stats);
   loadDeeplUsage();
+  runDeeplCount();               // 초안 채운 뒤 남은 분량 갱신
   await refreshState();
   if (STATE.curRel) openFile(STATE.curRel);
 }
@@ -982,6 +1004,7 @@ $("#deeplClose").onclick = closeDeepl;
 $("#deeplKeySave").onclick = saveDeeplKey;
 $("#deeplDraftFile").onclick = () => runDeeplDraft("file");
 $("#deeplDraftAll").onclick = () => runDeeplDraft("all");
+$("#deeplOverwrite").addEventListener("change", runDeeplCount);   // 덮어쓰기 토글 시 분량 재계산
 $("#deeplKey").addEventListener("keydown", (e) => { if (e.key === "Enter") saveDeeplKey(); });
 $("#deepl").addEventListener("click", (e) => { if (e.target.id === "deepl") closeDeepl(); });
 $("#termsClose").onclick = closeTerms;

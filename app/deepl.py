@@ -275,11 +275,11 @@ def usage(key: Optional[str] = None, force: str = "auto") -> Dict[str, int]:
     return {"count": count, "limit": limit, "remaining": max(0, limit - count)}
 
 
-def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
-                overwrite: bool = False, force: str = "auto") -> Dict[str, int]:
-    """proj 의 자유 텍스트(제어/내부명 제외)를 DeepL 초안으로 채운다.
-    rel 지정 시 그 파일만, overwrite=False 면 빈 ko 만 번역. 반환: {translated, chars, unique}."""
-    targets = []  # (unit, jp_decoded)
+def _collect_targets(proj: Dict[str, Any], rel: Optional[str] = None,
+                     overwrite: bool = False) -> List[tuple]:
+    """DeepL 번역 대상 유닛 수집 → [(unit, jp_decoded)].
+    자유 텍스트만(제어기호·내부명 제외), rel 지정 시 그 파일만, overwrite=False 면 빈 ko 만."""
+    targets = []
     for r, fd in proj["files"].items():
         if rel and r != rel:
             continue
@@ -296,6 +296,29 @@ def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
             if ko and not overwrite:
                 continue
             targets.append((u, jp))
+    return targets
+
+
+def count_chars(proj: Dict[str, Any], rel: Optional[str] = None,
+                overwrite: bool = False) -> Dict[str, int]:
+    """번역을 돌리기 전 예상 분량. DeepL 은 동일 문장을 한 번만 보내므로(쿼터 절약)
+    unique/chars 가 실제 소모 기준이다. 반환: {units, unique, chars, chars_raw}.
+      · units    : 번역 대상 칸 수(중복 포함)
+      · unique   : 서로 다른 문장 수(실제 API 호출 문장 수)
+      · chars    : 중복 제거 후 글자수(실제 쿼터 소모)
+      · chars_raw: 중복 포함 총 글자수(참고)"""
+    targets = _collect_targets(proj, rel, overwrite)
+    uniq_jp = list(dict.fromkeys(jp for _, jp in targets))
+    return {"units": len(targets), "unique": len(uniq_jp),
+            "chars": sum(len(j) for j in uniq_jp),
+            "chars_raw": sum(len(jp) for _, jp in targets)}
+
+
+def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
+                overwrite: bool = False, force: str = "auto") -> Dict[str, int]:
+    """proj 의 자유 텍스트(제어/내부명 제외)를 DeepL 초안으로 채운다.
+    rel 지정 시 그 파일만, overwrite=False 면 빈 ko 만 번역. 반환: {translated, chars, unique}."""
+    targets = _collect_targets(proj, rel, overwrite)
     if not targets:
         return {"translated": 0, "chars": 0, "unique": 0}
     uniq_jp = list(dict.fromkeys(jp for _, jp in targets))

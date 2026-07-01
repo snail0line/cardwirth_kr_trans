@@ -254,6 +254,16 @@ class Handler(BaseHTTPRequestHandler):
             except deepl.DeepLError as e:
                 return self._json({"error": str(e)}, 502)
 
+        if u.path == "/api/deepl_count":
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            overwrite = q.get("overwrite", ["0"])[0] in ("1", "true", "True")
+            cur_rel = q.get("rel", [""])[0]
+            file_cnt = deepl.count_chars(p, cur_rel, overwrite) if cur_rel else None
+            all_cnt = deepl.count_chars(p, None, overwrite)
+            return self._json({"ok": True, "file": file_cnt, "all": all_cnt})
+
         if u.path == "/api/terms":
             p = STATE["proj"]
             if not p:
