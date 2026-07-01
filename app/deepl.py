@@ -105,6 +105,21 @@ def _call(url: str, key: str, texts: List[str]) -> List[str]:
 _QALL = "“”‘’\"'"
 # 색상코드: & + 색 글자(r/g/b/y/w/o/p/l/d), 대소문자. get_fontcolour / app.js FONT_COLORS 와 일치.
 _COLOR = re.compile(r"&[rgbywopld]", re.I)
+# 전각 말줄임표를 어긴 ASCII 마침표 연속(3개 이상).
+_ELLIPSIS = re.compile(r"\.{3,}")
+
+
+def _restore_ellipsis(src: str, dst: str) -> str:
+    """DeepL 이 전각 말줄임표 '…'(U+2026)를 ASCII 마침표 3개 '...' 로 바꾸는 걸 되돌린다.
+
+    CardWirth 원문은 말줄임표에 전각 '…' 를 쓴다(ASCII '...' 를 쓰는 원문은 없음).
+    원문에 이미 ASCII '...' 가 있으면(원작 의도) 되돌릴 근거가 없으므로 손대지 않는다.
+    그 외에는 번역문의 '...' 를 3개 묶음 단위로 '…' 로 환산한다('......'→'……')."""
+    if "..." in src:                    # 원문이 ASCII 점을 씀 → 매핑 모호, 보류
+        return dst
+    if "..." not in dst:
+        return dst
+    return _ELLIPSIS.sub(lambda m: "…" * (len(m.group()) // 3) + "." * (len(m.group()) % 3), dst)
 
 
 def _restore_quotes(src: str, dst: str) -> str:
@@ -165,8 +180,8 @@ def _restore_color_space(src: str, dst: str) -> str:
     return "".join(out)
 
 
-# 줄머리의 (제어코드*)(공백*) 를 분리. 제어코드 = & 또는 # + 영숫자 1글자(색·치환코드).
-_LEAD = re.compile(r"^((?:[&#][0-9A-Za-z])*)([ \t　]*)(.*)$")
+# 줄머리의 제어코드(& 또는 # + 영숫자 1글자)와 공백이 섞인 선두부를 순서 무관하게 통째로 잡는다.
+_LEADRUN = re.compile(r"^(?:[&#][0-9A-Za-z]|[ \t　])*")
 
 # CardWirth 변수 참조: $...$ (예: $PC\一人称$). 안쪽은 식별자라 절대 번역하면 안 됨.
 _VAR = re.compile(r"\$[^$\n]*\$")
@@ -192,23 +207,25 @@ def _restore_vars(src: str, dst: str) -> str:
 
 
 def _restore_indent(src: str, dst: str) -> str:
-    """DeepL 이 줄머리 전각공백(U+3000) 들여쓰기를 일반공백으로 바꾸거나 지우는 걸
+    """DeepL 이 줄머리 전각공백(U+3000) 들여쓰기를 잃거나 위치를 어긋나게 놓는 걸
     원문 기준으로 복원한다.
 
-    CardWirth 메시지는 각 줄을 전각공백으로 들여쓰는데, DeepL 은 맨 첫 줄을 빼면
-    줄머리 U+3000 을 반각공백으로 normalize 하거나 아예 삭제해 레이아웃이 깨진다.
-    preserve_formatting 으로 개행 구조(개행 수)는 보존되므로, 개행 수가 같을 때만
-    줄 단위로 원문의 줄머리 공백을 그대로 옮긴다(제어코드는 번역문 것을 유지)."""
+    CardWirth 메시지는 각 줄을 전각공백으로 들여쓴다. 원문 줄머리가 `　#U…`(들여쓰기가
+    치환코드보다 앞섬)일 때, 코드만 보존한 DeepL 출력(`#U…`)에 들여쓰기를 되돌리려면
+    공백을 코드 '앞'에 붙여야 한다. 예전 구현은 `코드+공백+본문`으로 재조립해 `#U　는`처럼
+    코드와 조사 사이에 전각공백을 끼워 넣는 버그가 있었다(→ 게임에서 이름과 조사가 벌어짐).
+    이제는 줄머리의 (코드·공백 혼합) 선두부를 통째로 원문 것으로 갈아끼워 공백/코드 순서까지
+    원문과 일치시킨다. 개행 수가 같을 때만 줄 단위로 처리한다(구조 어긋나면 보류)."""
     if src.count("\n") != dst.count("\n"):
         return dst                      # 줄 구조가 어긋나면 위치 정렬이 깨지므로 손대지 않음
     out = []
     for s_line, d_line in zip(src.split("\n"), dst.split("\n")):
-        s_ws = _LEAD.match(s_line).group(2)
-        if "　" not in s_ws:            # 원문 줄머리에 전각 들여쓰기가 없으면 그대로 둠
+        s_pre = _LEADRUN.match(s_line).group(0)
+        if "　" not in s_pre:            # 원문 줄머리에 전각 들여쓰기가 없으면 그대로 둠
             out.append(d_line)
             continue
-        d_codes, _d_ws, d_rest = _LEAD.match(d_line).groups()
-        out.append(d_codes + s_ws + d_rest)
+        d_pre = _LEADRUN.match(d_line).group(0)
+        out.append(s_pre + d_line[len(d_pre):])
     return "\n".join(out)
 
 
@@ -231,6 +248,7 @@ def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "a
             dst = _restore_indent(src, dst)         # 줄머리 전각공백 들여쓰기 복원
             dst = _restore_vars(src, dst)           # $...$ 변수 참조 원문 복원
             dst = _restore_color_space(src, dst)    # 색상코드 뒤 덧붙은 반각공백 제거
+            dst = _restore_ellipsis(src, dst)       # ASCII '...' → 전각 '…' 복원
             out[src] = dst
         if progress:
             progress(min(s + BATCH, len(uniq)), len(uniq))
