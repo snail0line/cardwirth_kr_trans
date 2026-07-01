@@ -14,6 +14,10 @@ let STATE = { open: false, files: [], curRel: null };
 const LINE_UNITS = 43;      // 일반 메시지 자동 줄바꿈 한계(strlen)
 const LINE_UNITS_IMG = 33;  // 화자 그림/사진 있는 메시지 (그림 폭만큼 좁음, 32+1)
 const WRAP_ROWS = 7;        // 창에 보이는 세로 줄 수(넘으면 잘림/페이지 넘어감)
+// 카드 해설창(CastCard/ItemCard/SkillCard) — cardinfo.py + util.txtwrap mode=1.
+// wx 다이얼로그라 메시지창과 별개: 폭 37단위·9줄·13px, 색코드/7줄컷 없음(있는 그대로 표시).
+const CARD_UNITS = 37;
+const CARD_ROWS = 9;
 
 function charUnits(ch) {
   const c = ch.codePointAt(0);
@@ -23,9 +27,41 @@ function charUnits(ch) {
   return 2;                                   // 한글·일본어·한자·전각기호
 }
 
-// 텍스트를 게임처럼 strlen 한계(units)로 접어 줄 배열로 반환. 명시적 \n 은 그대로 유지.
-function wrapForGame(text, units) {
-  text = text.replace(/&[A-Za-z]/g, "");      // 게임에 안 보이는 색·제어코드 제거(폭 0)
+// CardWirthPy 폰트 색코드(&X) → 색 (cw/sprite/message.py get_fontcolour). 소문자만 유효.
+// b 는 파랑이 아니라 시안(0,255,255). o/p/l/d 는 1.50+. &w·미정의 코드는 기본색으로 리셋.
+const FONT_COLORS = {
+  r: "#ff0000", g: "#00ff00", b: "#00ffff", y: "#ffff00", w: "#ffffff",
+  o: "#ffa500", p: "#cc88ff", l: "#a9a9a9", d: "#696969",
+};
+
+// 텍스트를 게임처럼 strlen 한계(units)로 접어 줄 배열로 반환. 각 줄은 {color,text} 런 배열.
+// &X 색코드는 폭 0(줄바꿈 계산에서 제외)이며, 색은 줄바꿈·명시적 \n 을 넘어 유지된다.
+function wrapForGameRuns(text, units) {
+  const lines = [];
+  let cur = [], color = "", w = 0;
+  const push = (ch) => {
+    const last = cur[cur.length - 1];
+    if (last && last.color === color) last.text += ch;
+    else cur.push({ color, text: ch });
+  };
+  const newline = () => { lines.push(cur); cur = []; w = 0; };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\n") { newline(); continue; }
+    if (ch === "&" && /[A-Za-z]/.test(text[i + 1] || "")) {   // 색코드(폭 0)
+      color = FONT_COLORS[text[++i].toLowerCase()] || "";     // 미정의·&w → 기본색
+      continue;
+    }
+    const cw = charUnits(ch);
+    if (w + cw > units && w > 0) newline();
+    push(ch); w += cw;
+  }
+  lines.push(cur);                                            // 마지막(빈) 줄
+  return lines;
+}
+
+// 카드 해설용 평문 줄바꿈 — 색코드/치환 해석 없이 있는 그대로 units 폭으로 접는다(wx 다이얼로그).
+function wrapPlain(text, units) {
   const out = [];
   for (const raw of text.split("\n")) {
     let line = "", w = 0;
@@ -36,7 +72,25 @@ function wrapForGame(text, units) {
     }
     out.push(line);
   }
-  return out;                                 // 줄 배열
+  return out;
+}
+
+// 치환자(변수·이름 코드) — 게임 실행 시 값으로 치환된다(message.py _rpl_specialstr).
+// 에디터엔 그 상태가 없으니 사용자가 값을 넣어 미리볼 수 있게 한다. 값은 세션 전역 공유.
+const SUBST = {};                                        // 토큰 → 대체 텍스트
+const SUBST_RE = /(\$[^$\n]+\$|%[^%\n]+%|#[A-Za-z])/g;   // $..$ / %..% 변수, #x 이름코드
+const SHARP_LABEL = {                                    // #코드 뜻
+  "#m": "선택 캐릭터명", "#u": "비선택 캐릭터명", "#r": "랜덤 캐릭터명",
+  "#i": "화자명", "#c": "사용 카드명", "#y": "숙소 이름", "#t": "파티 이름",
+};
+function findSubstTokens(text) {
+  const seen = [];
+  const m = text.match(SUBST_RE);
+  if (m) m.forEach((t) => { if (!seen.includes(t)) seen.push(t); });
+  return seen;
+}
+function applySubst(text) {
+  return text.replace(SUBST_RE, (t) => (SUBST[t] ? SUBST[t] : t));   // 값 없으면 토큰 그대로
 }
 
 function toast(msg) {
@@ -345,15 +399,18 @@ function freeUnitEl(rel, u, skipAlt) {
     commit(val === u.jp ? "" : val);                   // 원문 그대로면 미번역으로 취급
   };
 
-  // 게임 창 미리보기 — 포커스한 메시지에만, 실제 메시지창처럼 렌더
+  // 게임 창 미리보기 — 메시지창(대사/나레이션)에만. 카드 설명(CastCard/ItemCard/SkillCard)은
+  // centering_y=True(card.py) 라 7줄 초과해도 안 잘리고 폭도 달라서 미리보기를 붙이지 않는다.
+  const isMsg = u.cat === "dialogue" || u.cat === "narration";
+  const isCard = u.cat === "desc";   // 카드 해설(CastCard/ItemCard/SkillCard) = 별도 미리보기
   const preview = document.createElement("div");
   preview.className = "game-preview";
   const limit = u.img ? LINE_UNITS_IMG : LINE_UNITS;   // 그림 있으면 33, 없으면 43
   if (u.img) preview.classList.add("gp-img");          // 이미지 폭만큼 본문이 오른쪽에서 시작
   const refreshPreview = () => {
-    const lines = wrapForGame(ta.value, limit);
+    const lines = wrapForGameRuns(applySubst(ta.value), limit);   // 치환자 값 반영해 렌더
     preview.innerHTML = "";
-    lines.forEach((ln, i) => {
+    lines.forEach((runs, i) => {
       if (i === WRAP_ROWS) {                       // 7줄 다음에 잘림선(게임에선 여기까지만 보임)
         const cut = document.createElement("div");
         cut.className = "gp-cut";
@@ -362,13 +419,83 @@ function freeUnitEl(rel, u, skipAlt) {
       }
       const d = document.createElement("div");
       d.className = "gp-line" + (i >= WRAP_ROWS ? " gp-over" : "");
-      d.textContent = ln || " ";              // 빈 줄도 높이 유지
+      if (!runs.length) {
+        d.textContent = " ";                     // 빈 줄도 높이 유지
+      } else {
+        runs.forEach((run) => {
+          if (run.color) {
+            const sp = document.createElement("span");
+            sp.style.color = run.color;
+            sp.textContent = run.text;
+            d.appendChild(sp);
+          } else {
+            d.appendChild(document.createTextNode(run.text));
+          }
+        });
+      }
       preview.appendChild(d);
     });
   };
-  ta.addEventListener("input", refreshPreview);
-  ta.addEventListener("focus", () => { refreshPreview(); preview.classList.add("gp-show"); });
-  ta.addEventListener("blur", () => { preview.classList.remove("gp-show"); });
+  // 치환자 입력 바 — 이 메시지에 있는 토큰별 입력칸(값은 전역 SUBST 로 메시지 간 공유)
+  const substBar = document.createElement("div");
+  substBar.className = "subst-bar";
+  const buildSubstBar = () => {
+    const toks = findSubstTokens(ta.value);
+    substBar.innerHTML = "";
+    if (!toks.length) { substBar.style.display = "none"; return; }
+    substBar.style.display = "flex";
+    const title = document.createElement("span");
+    title.className = "subst-title"; title.textContent = "치환자:";
+    substBar.appendChild(title);
+    toks.forEach((t) => {
+      const item = document.createElement("label");
+      item.className = "subst-item";
+      const key = document.createElement("span");
+      key.className = "subst-key"; key.textContent = t;
+      const inp = document.createElement("input");
+      inp.type = "text"; inp.value = SUBST[t] || "";
+      inp.placeholder = SHARP_LABEL[t.toLowerCase()] || "값 입력";
+      inp.oninput = () => { SUBST[t] = inp.value; refreshPreview(); };
+      item.appendChild(key); item.appendChild(inp);
+      substBar.appendChild(item);
+    });
+  };
+  if (isMsg) {
+    ta.addEventListener("input", () => { buildSubstBar(); refreshPreview(); });
+    ta.addEventListener("focus", () => { buildSubstBar(); refreshPreview(); preview.classList.add("gp-show"); });
+    // 치환자 입력칸으로 포커스가 옮겨가도 미리보기 유지, right 영역 밖으로 나가면 숨김
+    right.addEventListener("focusout", (e) => {
+      if (!right.contains(e.relatedTarget)) {
+        preview.classList.remove("gp-show");
+        substBar.style.display = "none";
+      }
+    });
+  }
+
+  // 카드 해설 미리보기 — 카드 설명창(37단위·9줄, 색코드/치환 해석·7줄컷 없음)
+  const cardPrev = document.createElement("div");
+  cardPrev.className = "card-preview";
+  const refreshCard = () => {
+    const lines = wrapPlain(ta.value, CARD_UNITS);
+    cardPrev.innerHTML = "";
+    lines.forEach((ln, i) => {
+      if (i === CARD_ROWS) {                        // 9줄 = 카드창에 보이는 범위 경계
+        const cut = document.createElement("div");
+        cut.className = "cp-cut";
+        cut.dataset.label = `${CARD_ROWS}줄`;
+        cardPrev.appendChild(cut);
+      }
+      const d = document.createElement("div");
+      d.className = "cp-line" + (i >= CARD_ROWS ? " cp-over" : "");
+      d.textContent = ln || " ";
+      cardPrev.appendChild(d);
+    });
+  };
+  if (isCard) {
+    ta.addEventListener("input", refreshCard);
+    ta.addEventListener("focus", () => { refreshCard(); cardPrev.classList.add("gp-show"); });
+    ta.addEventListener("blur", () => { cardPrev.classList.remove("gp-show"); });
+  }
 
   // 메시지별 "원문으로 되돌리기" — 초안/번역을 버리고 원문(jp)으로 리셋해 재번역 대상으로
   const bar = document.createElement("div");
@@ -387,7 +514,8 @@ function freeUnitEl(rel, u, skipAlt) {
 
   right.appendChild(bar);
   right.appendChild(ta);
-  right.appendChild(preview);
+  if (isMsg) { right.appendChild(substBar); right.appendChild(preview); }
+  else if (isCard) right.appendChild(cardPrev);
   el.appendChild(left); el.appendChild(right);
   return el;
 }
@@ -550,6 +678,49 @@ function renderSearchResults(list, q) {
   });
 }
 
+// ── 넘침 목록 (번역이 7줄 초과해 게임에서 잘리는 대사) ──
+async function showOverflow() {
+  if (!STATE.open) return toast("먼저 시나리오를 여세요");
+  $("#overflow").style.display = "flex";
+  runOverflow();
+}
+function closeOverflow() { $("#overflow").style.display = "none"; }
+async function runOverflow() {
+  const scope = $("#overflowScope").value;
+  const box = $("#overflowResults");
+  if (scope === "file" && !STATE.curRel) {
+    box.innerHTML = `<div class="empty">현재 열린 파일이 없습니다</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="empty">스캔 중…</div>`;
+  const rel = STATE.curRel ? `&rel=${encodeURIComponent(STATE.curRel)}` : "";
+  const r = await api(`/api/overflow?scope=${encodeURIComponent(scope)}${rel}`);
+  if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+  renderOverflowResults(r.results || []);
+}
+function renderOverflowResults(list) {
+  const box = $("#overflowResults");
+  box.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "search-count";
+  head.textContent = list.length
+    ? `${list.length}건 넘침${list.length >= 500 ? "+ (상한)" : ""}`
+    : "7줄을 넘기는 번역이 없습니다 👍";
+  box.appendChild(head);
+  list.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "sr-row";
+    const file = m.rel.split(/[\\/]/).pop();
+    const cat = m.cat ? `<span class="badge cat-${m.cat}">${SR_CAT[m.cat] || m.cat}</span>` : "";
+    const spk = m.speaker ? `<span class="badge spk">🗣 ${esc(m.speaker)}</span>` : "";
+    const img = m.img ? `<span class="badge img">🖼 33칸</span>` : "";
+    const over = `<span class="badge over">${m.rows}줄 (+${m.over})</span>`;
+    row.innerHTML = `<div class="sr-meta"><span class="sr-file" title="${esc(m.rel)}">${esc(file)}</span>${cat}${spk}${img}${over}</div><div class="sr-ko">${esc(m.ko)}</div>`;
+    row.onclick = () => { closeOverflow(); jumpTo(m.rel, m.sid); };
+    box.appendChild(row);
+  });
+}
+
 // ── DeepL 자동 번역 초안 ──
 function renderDeeplKeyStat(d) {
   const el = $("#deeplKeyStat");
@@ -656,8 +827,16 @@ async function doExport() {
   } else {
     def = $("#scenDir").value.trim().replace(/[\\/]+$/, "") + "_KR";
   }
-  const out = prompt("내보낼 경로 (폴더, 또는 .wsn 으로 끝나면 패키지로 압축):", def);
-  if (!out) return;
+  // 폴더/wsn 선택처럼 네이티브 저장 다이얼로그로. 기본 경로를 폴더/파일명으로 분리해 전달.
+  const norm = def.replace(/\\/g, "/");
+  const slash = norm.lastIndexOf("/");
+  const initdir = slash >= 0 ? norm.slice(0, slash) : "";
+  const initfile = slash >= 0 ? norm.slice(slash + 1) : norm;
+  toast("저장 위치 선택창을 여는 중…");
+  const pick = await post("/api/pick_folder", { kind: "save", initfile, initdir });
+  if (pick.error) return toast("선택창 오류: " + pick.error + " (터미널에서 직접 서버를 실행했는지 확인)");
+  if (!pick.path) return toast("취소됨");
+  const out = pick.path;
   toast("내보내는 중…");
   const r = await post("/api/export", { out_dir: out });
   if (r.error) return toast("오류: " + r.error);
@@ -702,6 +881,11 @@ $("#searchGo").onclick = runSearch;
 $("#searchQ").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
 $("#searchScope").onchange = runSearch;
 $("#search").addEventListener("click", (e) => { if (e.target.id === "search") closeSearch(); });
+$("#btnOverflow").onclick = showOverflow;
+$("#overflowClose").onclick = closeOverflow;
+$("#overflowGo").onclick = runOverflow;
+$("#overflowScope").onchange = runOverflow;
+$("#overflow").addEventListener("click", (e) => { if (e.target.id === "overflow") closeOverflow(); });
 $("#btnFlow").onclick = showFlow;
 $("#btnTerms").onclick = showTerms;
 $("#btnDeepl").onclick = showDeepl;

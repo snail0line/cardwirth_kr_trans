@@ -17,6 +17,7 @@
   <div class="progress" id="progress">—</div>
   <div class="actions">
     <button id="btnSearch" title="원문/번역으로 검색">🔍 검색</button>
+    <button id="btnOverflow" title="번역이 7줄을 넘겨 게임에서 잘리는 대사 찾기">⚠ 넘침</button>
     <button id="btnFlow">🔀 흐름</button>
     <button id="btnTerms">📖 용어집</button>
     <button id="btnDeepl" title="DeepL 로 번역 초안 자동 생성">🌐 DeepL 초안</button>
@@ -115,6 +116,23 @@
       <button id="searchGo" class="primary">검색</button>
     </div>
     <div id="searchResults" class="search-results"></div>
+  </div>
+</div>
+
+<div id="overflow" class="modal" style="display:none">
+  <div class="modal-box search-box">
+    <div class="modal-head">
+      <span>넘침 목록 — 번역이 7줄을 넘겨 게임에서 잘리는 대사 (결과 클릭 → 그 문장으로 이동)</span>
+      <button id="overflowClose" class="x">✕</button>
+    </div>
+    <div class="search-bar">
+      <select id="overflowScope">
+        <option value="all">시나리오 전체</option>
+        <option value="file">현재 파일만</option>
+      </select>
+      <button id="overflowGo" class="primary">다시 스캔</button>
+    </div>
+    <div id="overflowResults" class="search-results"></div>
   </div>
 </div>
 

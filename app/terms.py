@@ -10,6 +10,7 @@
 적용 대상은 자유 텍스트(free)만. 플래그/쿠폰 등 식별자엔 적용하지 않는다.
 """
 from __future__ import annotations
+import re
 from collections import Counter
 from typing import Dict, Any, List
 
@@ -39,6 +40,46 @@ def _is_structural_id(s: str) -> bool:
     return any(c in _STRUCT_CH for c in s)
 
 
+# $PC\人物描写\髪の色$ / %..% = 게임이 실행 시 값(쿠폰·PC속성 등)으로 치환하는 변수 참조.
+# 번역 대상이 아니므로(건드리면 깨짐) 용어·식별자·초안치환에서 제외한다.
+_VAR_RE = re.compile(r"\$[^$\n]*\$|%[^%\n]*%")
+
+
+def _is_variable_ref(s: str) -> bool:
+    """(exact 값용) 문자열이 사실상 변수 참조($..$ / %..%)만으로 이뤄졌는지.
+    토큰이 섞인 정상 문장(반복 대사)은 제외 대상이 아니므로 False."""
+    if not s:
+        return False
+    rest = _VAR_RE.sub("", s).strip().strip("「」 \\n")
+    return not rest and bool(_VAR_RE.search(s))
+
+
+def _is_system_name(s: str) -> bool:
+    """(word/식별자 이름 후보용) 쿠폰·PC속성 경로(PC\\人物描写\\目の色, PC\\三人称,
+    進行度\\... 등 백슬래시 계층 이름) 또는 변수 참조. 이름 자체가 시스템 식별자라
+    캐릭터명/용어 후보에서 제외한다."""
+    if not s:
+        return False
+    return "\\" in s or _is_variable_ref(s)
+
+
+def _protect_vars(text: str):
+    """치환 보호: $..$ / %..% 구간을 임시 placeholder 로 빼둔다. (masked, holds) 반환."""
+    holds: List[str] = []
+
+    def _repl(m: "re.Match") -> str:
+        holds.append(m.group(0))
+        return f"\x00{len(holds) - 1}\x00"
+
+    return _VAR_RE.sub(_repl, text), holds
+
+
+def _restore_vars(text: str, holds: List[str]) -> str:
+    for i, v in enumerate(holds):
+        text = text.replace(f"\x00{i}\x00", v)
+    return text
+
+
 def _free_values(proj: Dict[str, Any]) -> List[str]:
     """모든 자유 텍스트의 표시형(디코드) 값."""
     out = []
@@ -64,7 +105,7 @@ def _identifier_names(proj: Dict[str, Any]) -> set:
     out = set()
     for g in proj.get("glossary", {}).values():
         t = _clean_term(g.get("jp", ""))
-        if t:
+        if t and not _is_system_name(t):
             out.add(t)
     return out
 
@@ -102,21 +143,30 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
     # ── exact: 동일 자유텍스트 값 2회+ ──
     cnt = Counter(v.strip() for v in free_vals if v.strip())
     exact = [entry(v, c, True) for v, c in cnt.most_common()
-             if c >= 2 and len(v) <= 30]
+             if c >= 2 and len(v) <= 30 and not _is_variable_ref(v)]
 
     # ── word: 식별자/캐릭터 이름 중 자유텍스트에 등장 (구조적 내부식별자는 제외) ──
     cand = set()
     for g in proj.get("glossary", {}).values():
         t = _clean_term(g.get("jp", ""))
-        if len(t) >= 2 and not _is_structural_id(t):
+        if len(t) >= 2 and not _is_structural_id(t) and not _is_system_name(t):
             cand.add(t)
     for f in proj["files"].values():
         for u in f["units"]:
             sp = (u.get("speaker") or "").strip()
             if len(sp) >= 2 and sp not in _SYNTHETIC_SPEAKERS \
-                    and not sp.endswith("PC") and not _is_structural_id(sp):
+                    and not sp.endswith("PC") and not _is_structural_id(sp) \
+                    and not _is_system_name(sp):
                 cand.add(sp)
-    joined = "\n".join(free_vals)
+    # 실제 '표시 텍스트'에 등장하는 것만 용어로 센다(같은 문자열이 표시 텍스트면 남긴다):
+    #  · 변수 참조($..$ / %..%) 내부는 제외 — 토큰 안 substring(二人称 등)이 용어로 잡히는 것 방지
+    #  · 그 후에도 백슬래시가 남는 값(パッケージ\… 같은 시스템 경로)은 표시 텍스트가 아니므로 제외
+    disp_vals = []
+    for v in free_vals:
+        v2 = _VAR_RE.sub("", v)
+        if "\\" not in v2:
+            disp_vals.append(v2)
+    joined = "\n".join(disp_vals)
     words = [entry(t, joined.count(t), False) for t in cand if joined.count(t) >= 1]
     words.sort(key=lambda x: -x["count"])
 
@@ -190,10 +240,12 @@ def apply_words_to_drafts(proj: Dict[str, Any], only_untranslated: bool = True) 
             if only_untranslated and u.get("ko"):
                 continue
             disp = textcodec.decode(u["jp"])
-            new = disp
+            masked, holds = _protect_vars(disp)   # $..$ / %..% 안은 치환에서 보호(쿠폰·변수 참조 보존)
+            new = masked
             for tj, tk in items:
                 if tj and tj in new:
                     new = new.replace(tj, tk)
+            new = _restore_vars(new, holds)
             if new != disp:
                 u["ko"] = textcodec.encode(new)
                 n += 1

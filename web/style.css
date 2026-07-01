@@ -139,28 +139,54 @@ input[type=text] {
 /* 게임 창 미리보기 — 포커스한 메시지에만, 실제 CardWirth 메시지창처럼 렌더 */
 .game-preview {
   position: relative; display: none; margin-top: 8px;
-  width: max-content; max-width: 100%; min-width: 21.5em; /* 43단위 = 전각 21.5칸 */
-  padding: 12px 16px; border: 2px solid #b07b28; border-radius: 3px;
+  box-sizing: border-box;
+  width: 470px; max-width: 100%; min-height: 180px;  /* 원본 메시지창 고정 크기 470×180 (message.py:62) */
+  padding: 9px 22px 17px 14px;                       /* 여백 좌14·상9 (pos_noscale=(14,9)), 우22=본문 정확히 430px(43단위) */
+  border: 2px solid #b07b28; border-radius: 3px;
   background: #0c0c0c; color: #f2f2f2; white-space: pre; overflow-x: auto;
   font-family: "D2Coding", Consolas, "맑은 고딕", "Malgun Gothic", monospace;
-  font-size: 15px; line-height: 1.55;
+  font-size: 20px; line-height: 22px;                /* 전각 1글자 20px(=10px/단위)·줄높이 22px */
 }
 .game-preview.gp-show { display: block; }
-/* 이미지 있는 메시지: 그림 폭(43→33 = 10단위 = 5em)만큼 본문이 오른쪽에서 시작 */
-.game-preview.gp-img { padding-left: 5.6em; }
+/* 그림 있는 메시지: 그림 74px + 간격 25px + 좌여백 14px = 본문이 x=113 에서 시작(33단위=330px) */
+.game-preview.gp-img { padding-left: 113px; }
 .game-preview.gp-img::before {
-  content: "🖼"; position: absolute; left: 12px; top: 12px;
-  width: 4.4em; height: 5.5em; box-sizing: border-box;
+  content: "🖼"; position: absolute; left: 12px; top: 9px;
+  width: 88px; height: 120px; box-sizing: border-box;
   display: flex; align-items: center; justify-content: center;
-  border: 1px dashed #4b5563; border-radius: 3px; color: #6b7280; font-size: 13px;
+  border: 1px dashed #4b5563; border-radius: 3px; color: #6b7280; font-size: 15px;
 }
-.gp-line { min-height: 1.55em; }
+.gp-line { min-height: 22px; }
 .gp-over { opacity: 0.38; }                         /* 7줄 넘는 줄 = 게임에선 안 보임 */
 .gp-cut { position: relative; height: 0; margin: 3px 0; border-top: 1px dashed #e05555; }
 .gp-cut::after {
   content: attr(data-label); position: absolute; right: 0; top: -0.85em;
   padding: 0 4px; background: #0c0c0c; color: #e05555; font-size: 10px;
 }
+/* 카드 해설 미리보기 — wx 다이얼로그(cardinfo.py): 37단위 폭 × 9줄, 13px, 밝은 배경 */
+.card-preview {
+  display: none; margin-top: 8px; box-sizing: border-box;
+  width: 277px; max-width: 100%; min-height: 165px;   /* 카드 정보창 박스 277×165(등배, cardinfo.py:186) */
+  padding: 8px 13px; border: 2px solid #8a6d3b; border-radius: 4px;   /* 외곽 = textwidth(≈247) + 30 */
+  background: #f3ead6; color: #2b2b2b; white-space: pre; overflow-x: auto;
+  font-family: "D2Coding", Consolas, "맑은 고딕", "Malgun Gothic", monospace;
+  font-size: 13px; line-height: 16px;                 /* 13px 고딕(datadesc), 9행 ≈ 144px */
+}
+.card-preview.gp-show { display: block; }
+.cp-line { min-height: 16px; }
+.cp-over { opacity: 0.4; }                            /* 9줄 넘는 부분 = 카드창 밖 */
+.cp-cut { position: relative; height: 0; margin: 2px 0; border-top: 1px dashed #a07d3a; }
+.cp-cut::after {
+  content: attr(data-label); position: absolute; right: 0; top: -0.85em;
+  padding: 0 4px; background: #f3ead6; color: #a07d3a; font-size: 10px;
+}
+/* 치환자 입력 바 ($..$ / #x 토큰에 값 넣어 미리보기) */
+.subst-bar { display: none; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 8px; }
+.subst-title { font-size: 12px; color: #6b7280; font-weight: 600; }
+.subst-item { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: #374151; }
+.subst-key { font-family: "D2Coding", Consolas, monospace; background: #fef3c7; color: #b45309; padding: 1px 5px; border-radius: 4px; }
+.subst-item input { width: 8em; font-size: 12px; padding: 2px 6px; border: 1px solid #d1d5db; border-radius: 4px; }
+.subst-item input:focus { border-color: #2563eb; outline: none; }
 .unit textarea {
   font: inherit; width: 100%; min-height: 60px; resize: vertical; line-height: 1.55;
   border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; color: #111827;
@@ -282,6 +308,13 @@ input[type=text] {
 .sr-ko { font-size: 13px; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sr-ko.sr-empty { color: #9ca3af; font-style: italic; }
 .search-results mark { background: #fde68a; color: inherit; border-radius: 2px; padding: 0 1px; }
+/* 결과 목록 badge (검색·넘침 목록 공용) — 기존 .unit .badge 는 유닛 카드 전용이라 여기서 별도 정의 */
+.sr-meta .badge { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #f3f4f6; color: #6b7280; font-weight: 600; white-space: nowrap; }
+.sr-meta .badge.spk { background: rgba(43,99,255,0.08); color: #2563eb; }
+.sr-meta .badge.cat-dialogue { background: #dbeafe; color: #1d4ed8; }
+.sr-meta .badge.cat-narration { background: #f3e8ff; color: #7c3aed; }
+.sr-meta .badge.img { background: #ede9fe; color: #6d28d9; }
+.sr-meta .badge.over { background: rgba(185,28,28,0.08); color: #b91c1c; font-weight: 700; }
 
 /* DeepL 자동 번역 초안 */
 .deepl-box { width: 560px; max-width: 92vw; }

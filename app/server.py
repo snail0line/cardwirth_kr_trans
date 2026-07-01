@@ -12,7 +12,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search, update
+from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search, overflow, update
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 HOST, PORT = "127.0.0.1", 8765
@@ -26,9 +26,16 @@ def _picker_code(kind: str) -> str:
     if kind == "file":     # .wsn 패키지 파일 선택
         call = ("p=filedialog.askopenfilename(title='CardWirth .wsn package', parent=r,"
                 "filetypes=[('CardWirth 패키지','*.wsn'),('모든 파일','*.*')])\n")
+    elif kind == "save":   # 번역 결과 저장 위치(.wsn=패키지 / 확장자 없으면 폴더). 기본값은 env 로 전달
+        call = ("p=filedialog.asksaveasfilename("
+                "title='번역 결과 저장 — 파일명이 .wsn 이면 패키지, 확장자 없으면 폴더', parent=r,"
+                " initialdir=os.environ.get('CW_INITDIR',''),"
+                " initialfile=os.environ.get('CW_INITFILE',''),"
+                " filetypes=[('CardWirth 패키지 (.wsn)','*.wsn'),('폴더로 저장','*')])\n")
     else:                  # 시나리오 XML 폴더 선택
         call = "p=filedialog.askdirectory(title='CardWirth scenario XML folder', parent=r)\n"
     return (
+        "import os\n"
         "import tkinter as tk\n"
         "from tkinter import filedialog\n"
         "r=tk.Tk()\n"
@@ -44,15 +51,19 @@ def _picker_code(kind: str) -> str:
     )
 
 
-def _pick_folder_dialog(kind: str = "dir") -> dict:
-    """사용자 데스크톱에 네이티브 선택 다이얼로그를 띄운다. kind: 'dir'|'file'.
+def _pick_folder_dialog(kind: str = "dir", initfile: str = "", initdir: str = "") -> dict:
+    """사용자 데스크톱에 네이티브 선택 다이얼로그를 띄운다. kind: 'dir'|'file'|'save'.
+    save 모드의 기본 파일명/폴더는 initfile/initdir 로 전달(환경변수 경유, 이스케이프 회피).
     서버가 사용자의 인터랙티브 세션에서 실행 중이어야 창이 보인다.
     반환: {path, error}."""
     import subprocess
+    env = dict(os.environ)
+    env["CW_INITFILE"] = initfile or ""
+    env["CW_INITDIR"] = initdir or ""
     try:
         # text=False(바이트)로 받아 UTF-8 로 직접 디코드 (cp932 자동디코딩 크래시 방지)
         out = subprocess.run([sys.executable, "-c", _picker_code(kind)],
-                             capture_output=True, timeout=600)
+                             capture_output=True, timeout=600, env=env)
         path = (out.stdout or b"").decode("utf-8", "replace").strip()
         err = (out.stderr or b"").decode("utf-8", "replace").strip()
         if not path and err:
@@ -189,6 +200,13 @@ class Handler(BaseHTTPRequestHandler):
             query = q.get("q", [""])[0]
             scope = q.get("scope", ["both"])[0]
             return self._json({"results": search.search_units(p, query, scope)})
+        if u.path == "/api/overflow":
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            scope = q.get("scope", ["all"])[0]
+            cur_rel = q.get("rel", [""])[0]
+            return self._json({"results": overflow.find_overflow(p, scope, cur_rel)})
         if u.path == "/api/outline":
             import xml.etree.ElementTree as ET
             p = STATE["proj"]; rel = q.get("rel", [""])[0]
@@ -252,7 +270,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"bad json: {e}"}, 400)
 
         if u.path == "/api/pick_folder":
-            return self._json(_pick_folder_dialog(data.get("kind", "dir")))
+            return self._json(_pick_folder_dialog(
+                data.get("kind", "dir"), data.get("initfile", ""), data.get("initdir", "")))
 
         if u.path == "/api/open":
             d = data.get("scenario_dir", "").strip().strip('"')
