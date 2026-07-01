@@ -36,3 +36,13 @@ def encode(s: str) -> str:
     s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = s.replace("\n", "\\n")
     return s
+
+
+# CardWirth encodewrap(\\·\n 이스케이프)은 요소 본문(#text)에만 적용된다.
+# 속성 값(@name 선택지 라벨 등)은 raw 저장이라 이스케이프하면 안 된다(백슬래시 이중화 → 토큰 깨짐).
+def decode_field(field: str, s: str) -> str:
+    return decode(s) if field == "#text" else (s or "")
+
+
+def encode_field(field: str, s: str) -> str:
+    return encode(s) if field == "#text" else (s or "")

@@ -30,10 +30,10 @@ def export_csv(proj: Dict[str, Any], path: str, only_untranslated: bool = False)
                     continue
                 if u.get("cat") == "sysname":   # 내부명(플레이어 비노출) 제외
                     continue
-                ko = textcodec.decode(u.get("ko", ""))
+                ko = textcodec.decode_field(u["field"], u.get("ko", ""))
                 if only_untranslated and ko:
                     continue
-                w.writerow([rel, u["id"], textcodec.decode(u["jp"]), ko])
+                w.writerow([rel, u["id"], textcodec.decode_field(u["field"], u["jp"]), ko])
                 rows += 1
     return rows
 
@@ -60,12 +60,12 @@ def import_csv(proj: Dict[str, Any], path: str) -> Dict[str, int]:
             if u is None:
                 unmatched += 1
                 continue
-            jp = textcodec.decode(u["jp"])
+            jp = textcodec.decode_field(u["field"], u["jp"])
             new = "" if (ko.strip() == "" or ko == jp) else ko
-            cur = textcodec.decode(u.get("ko", ""))
+            cur = textcodec.decode_field(u["field"], u.get("ko", ""))
             if new == cur:
                 skipped += 1
                 continue
-            u["ko"] = textcodec.encode(new)
+            u["ko"] = textcodec.encode_field(u["field"], new)
             applied += 1
     return {"applied": applied, "skipped": skipped, "unmatched": unmatched, "rows": rows}

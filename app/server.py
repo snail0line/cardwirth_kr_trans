@@ -189,8 +189,8 @@ class Handler(BaseHTTPRequestHandler):
                 if un["kind"] != "free":
                     continue
                 d = dict(un)
-                d["jp"] = textcodec.decode(un["jp"])
-                d["ko"] = textcodec.decode(un.get("ko", ""))
+                d["jp"] = textcodec.decode_field(un["field"], un["jp"])
+                d["ko"] = textcodec.decode_field(un["field"], un.get("ko", ""))
                 units.append(d)
             return self._json({"rel": rel, "units": units})
         if u.path == "/api/search":
@@ -309,10 +309,10 @@ class Handler(BaseHTTPRequestHandler):
             ko = data.get("ko", "")
             if kind == "free":
                 rel, uid = data["rel"], data["id"]
-                ko_raw = textcodec.encode(ko)  # 줄바꿈 → \n 저장형
                 for unit in p["files"][rel]["units"]:
                     if unit["id"] == uid and unit["kind"] == "free":
-                        unit["ko"] = ko_raw
+                        # #text 만 CardWirth 이스케이프(\\·\n), 속성(@name 선택지 등)은 raw 저장
+                        unit["ko"] = textcodec.encode_field(unit["field"], ko)
                         break
             elif kind == "entity":
                 gk = data["gkey"]

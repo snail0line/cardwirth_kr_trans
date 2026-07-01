@@ -5,9 +5,23 @@ import os
 import json
 from typing import Dict, Any
 
-from . import extract
+from . import extract, textcodec
 
 PROJECTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "projects"))
+
+
+def _migrate_attr_ko(proj: Dict[str, Any]) -> Dict[str, Any]:
+    """구버전 버그 복구: 속성(@…) 슬롯 ko 에도 CardWirth 이스케이프가 걸려 백슬래시가
+    이중화됐다(선택지의 $PC\\…$ 토큰이 게임에서 깨짐). @ 슬롯 ko 를 한 번 decode 해 raw 로
+    되돌린다. 백슬래시 없는 정상값엔 무해(idempotent). 프로젝트당 1회(_attr_ko_fixed)."""
+    if proj.get("_attr_ko_fixed"):
+        return proj
+    for f in proj.get("files", {}).values():
+        for u in f.get("units", []):
+            if u.get("kind") == "free" and u.get("field") != "#text" and u.get("ko"):
+                u["ko"] = textcodec.decode(u["ko"])
+    proj["_attr_ko_fixed"] = True
+    return proj
 
 
 def _safe_name(scenario_dir: str) -> str:
@@ -32,7 +46,7 @@ def load(scenario_dir: str) -> Dict[str, Any] | None:
     if not os.path.isfile(p):
         return None
     with open(p, encoding="utf-8") as f:
-        return json.load(f)
+        return _migrate_attr_ko(json.load(f))
 
 
 _LAST = os.path.join(PROJECTS_DIR, ".last_scenario")

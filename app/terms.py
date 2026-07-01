@@ -212,12 +212,12 @@ def remove_manual(proj: Dict[str, Any], jp: str) -> None:
 def apply_exact(proj: Dict[str, Any], jp: str, ko: str) -> int:
     """exact 용어: 동일 자유텍스트 값 전부에 ko 를 일괄 적용. 적용 건수 반환."""
     proj.setdefault("terms", {})[jp] = ko
-    ko_raw = textcodec.encode(ko)
     n = 0
     for f in proj["files"].values():
         for u in f["units"]:
-            if u["kind"] == "free" and textcodec.decode(u["jp"]).strip() == jp.strip():
-                u["ko"] = ko_raw
+            if u["kind"] == "free" and textcodec.decode_field(u["field"], u["jp"]).strip() == jp.strip():
+                # #text 만 이스케이프, 속성(@name)은 raw
+                u["ko"] = textcodec.encode_field(u["field"], ko)
                 n += 1
     return n
 
@@ -239,7 +239,7 @@ def apply_words_to_drafts(proj: Dict[str, Any], only_untranslated: bool = True) 
                 continue
             if only_untranslated and u.get("ko"):
                 continue
-            disp = textcodec.decode(u["jp"])
+            disp = textcodec.decode_field(u["field"], u["jp"])
             masked, holds = _protect_vars(disp)   # $..$ / %..% 안은 치환에서 보호(쿠폰·변수 참조 보존)
             new = masked
             for tj, tk in items:
@@ -247,6 +247,6 @@ def apply_words_to_drafts(proj: Dict[str, Any], only_untranslated: bool = True) 
                     new = new.replace(tj, tk)
             new = _restore_vars(new, holds)
             if new != disp:
-                u["ko"] = textcodec.encode(new)
+                u["ko"] = textcodec.encode_field(u["field"], new)   # #text 만 이스케이프, 속성은 raw
                 n += 1
     return n
