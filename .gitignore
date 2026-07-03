@@ -7,6 +7,10 @@ _export_test/
 *azure_key*
 *azure_usage*
 
+# 개인용 classic 변환 스크립트 (배포 안 함)
+tools/convert_classic.py
+tools/convert_classic.bat
+
 # 제3자 시나리오(저작권) — 배포물에 포함하지 않음
 test_scenario/
 
