@@ -183,8 +183,9 @@ def _restore_color_space(src: str, dst: str) -> str:
 # 줄머리의 제어코드(& 또는 # + 영숫자 1글자)와 공백이 섞인 선두부를 순서 무관하게 통째로 잡는다.
 _LEADRUN = re.compile(r"^(?:[&#][0-9A-Za-z]|[ \t　])*")
 
-# CardWirth 변수 참조: $...$ (예: $PC\一人称$). 안쪽은 식별자라 절대 번역하면 안 됨.
-_VAR = re.compile(r"\$[^$\n]*\$")
+# CardWirth 변수 참조: $...$ (예: $PC\一人称$) 와 %...% (상태 변수, 예: %02/食事済？%).
+# 안쪽은 식별자라 절대 번역하면 안 됨. (본문 속 퍼센트는 관례상 전각 ％ 라 충돌 없음)
+_VAR = re.compile(r"\$[^$\n]*\$|%[^%\n]*%")
 
 
 def _restore_vars(src: str, dst: str) -> str:

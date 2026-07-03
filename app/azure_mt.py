@@ -136,47 +136,74 @@ def _call(key: str, region: str, texts: List[str]) -> List[str]:
 _PROTECT = re.compile(r"&[rgbywopld]", re.I)
 _TAG = re.compile(r"</?span[^>]*>")
 
-# 이름 치환 대상: $...$ 변수 참조, #X 치환코드(캐릭터 이름 등).
-_NAMEPAT = re.compile(r"\$[^$\n]*\$|#[0-9A-Za-z]")
-# 치환용 이름 풀: (일본어, 허용 한국어 음차). 일반명사와 안 겹치고(ユリ=백합 오번역 사례)
-# 어두가 유성음/모음이라 음차 표기가 흔들리지 않는 이름만 쓴다.
-_NAMES = (("ミナ", ("미나",)), ("エマ", ("에마", "엠마")), ("ナオ", ("나오",)),
-          ("リンネ", ("린네",)), ("アンナ", ("안나",)), ("サキ", ("사키",)))
+# 이름 치환 대상: $...$ 변수 참조, %...% 상태 변수, #X 치환코드(캐릭터 이름 등).
+_NAMEPAT = re.compile(r"\$[^$\n]*\$|%[^%\n]*%|#[0-9A-Za-z]")
+# 인명 치환 풀: (일본어, 허용 한국어 음차). 일반명사와 안 겹치고(ユリ=백합 오번역 사례)
+# 음차 표기가 흔들리지 않는 이름만. 남녀 공용 이름 위주 — 여성형 이름(ミナ/エマ)을
+# 쓰면 영어 피벗이 없는 소유격을 "her→그녀"로 지어내는 편향이 생긴다.
+_NAMES = (("ヒカル", ("히카루",)), ("マコト", ("마코토",)), ("アキラ", ("아키라",)),
+          ("ナオ", ("나오",)), ("カオル", ("카오루",)), ("ツバサ", ("츠바사", "쓰바사")))
+# 코드 의미별 치환어 — CWXEditor 상태변수 정의 기준. 인명이 아닌 코드는 보통명사로
+# 바꿔야 번역이 자연스럽다(#Y=여관 이름을 인명으로 바꾸면 "여관으로 돌아가"가 안 나옴).
+_KIND_WORDS = {
+    "Y": (("宿", ("여관", "숙소")),),            # 여관 이름
+    "T": (("チーム", ("팀",)),),                 # 팀 이름
+    "C": (("カード", ("카드",)),),               # 선택 카드 이름
+    # #M/#U/#R/#I(멤버/화자 이름)는 인명 풀 사용. メンバー(멤버) 치환을 실측한 결과
+    # 보통명사라 엔진이 "멤버들"(복수화 — 개수검증을 통과하는 오염)·"직원"(의역 — 스킵)
+    # 으로 변형해서 고유명사 치환보다 나빴다. 런타임 값도 실제 인명이라 의미상 정확.
+}
 
 
 def _mask_names(src: str) -> tuple:
-    """변수/치환코드 → 이름. 동일 토큰은 동일 이름. 반환 (치환문, [(일본어, 음차들, 원토큰)]).
+    """변수/치환코드 → 이름. 동일 토큰은 동일 이름. 반환 (치환문, [(일본어, 음차들, 원토큰, 개수)]).
 
     원문에 이미 등장하는 이름은 쓰지 않는다 — 진짜 그 이름의 캐릭터가 있는 문장이면
     되치환 때 캐릭터 이름까지 변수로 오염되기 때문. 치환·복원이 문장 단위라
     다른 문장에 나오는 이름과는 충돌하지 않는다."""
     seen: Dict[str, str] = {}
     used = []
-    avail = [n for n in _NAMES if n[0] not in src]
+    counts: Dict[str, int] = {}
+    taken = set()
+
+    def pick(tok):
+        """토큰 의미에 맞는 치환어 선택 — 코드별 보통명사 우선, 없으면 인명 풀."""
+        cands = _KIND_WORDS.get(tok[1].upper(), ()) if tok.startswith("#") else ()
+        for jp, kos in tuple(cands) + _NAMES:
+            if jp in src or jp in taken:        # 원문 등장/이미 사용 → 다음 후보
+                continue
+            taken.add(jp)
+            return jp, kos
+        return None                             # 풀 소진 — 토큰 그대로 둠
 
     def rep(m):
         tok = m.group()
         if tok not in seen:
-            if len(seen) >= len(avail):         # 이름 풀 소진(변수 종류 과다/충돌) — 그대로 둠
+            got = pick(tok)
+            if got is None:
                 return tok
-            jp, kos = avail[len(seen)]
-            seen[tok] = jp
-            used.append((jp, kos, tok))
+            seen[tok] = got[0]
+            used.append((got[0], got[1], tok))
+        counts[tok] = counts.get(tok, 0) + 1
         return seen[tok]
 
-    return _NAMEPAT.sub(rep, src), used
+    masked = _NAMEPAT.sub(rep, src)
+    return masked, [(jp, kos, tok, counts.get(tok, 0)) for jp, kos, tok in used]
 
 
 def _unmask_names(dst: str, used) -> tuple:
-    """번역문의 음차된 이름 → 원 토큰. 이름이 하나라도 생략됐으면 ok=False (폴백 대상)."""
+    """번역문의 음차된 이름 → 원 토큰. ok=False 조건 (폴백/스킵 대상):
+    · 이름이 번역에서 생략됨 (주어 생략 등)
+    · 되치환 후 토큰 개수가 원문과 다름 — 엔진이 이름을 반복/증식시킨 오염
+      (예: #Y 1개가 번역문에 2개로 복제되는 케이스)"""
     ok = True
-    for jp, kos, tok in used:
+    for jp, kos, tok, n_src in used:
         hit = False
         for ko in tuple(kos) + (jp,):           # 음차 또는 일본어 그대로 남은 경우
             if ko in dst:
                 dst = dst.replace(ko, tok)
                 hit = True
-        if not hit:
+        if not hit or dst.count(tok) != n_src:
             ok = False
     return dst, ok
 
@@ -211,6 +238,108 @@ def _fix_line(src_line: str, dst_line: str) -> str:
     return dst_line
 
 
+# 문장 종결로 취급하는 줄 끝 문자 — 이걸로 안 끝나는 줄은 다음 줄과 같은 문장이
+# 중간에서 줄바꿈된 것으로 보고 이어 붙여 번역한다("いくら/でも" 분단 방지).
+_SENT_END = tuple("。．！？…‼⁉」』】)）!?")
+# 빈 줄을 '건너서도' 문장이 이어진다고 볼 단서 — 조사/쉼표로 끝나면 명백한 문장 중간.
+# (더블 스페이싱 대응. 명사로 끝나는 줄은 목록 항목일 수 있어 빈 줄에서 끊는다.)
+_CONT_END = tuple("、，をはがのにへとでもや")
+
+
+# 줄머리 분리는 공백/들여쓰기 + &색상코드까지만. deepl._LEADRUN 과 달리 #X 는 포함하지
+# 않는다 — #X 는 이름 치환 대상인 문장 내용이라, 떼어내면 병합 문장에서 유실되고
+# 재줄바꿈 들여쓰기 패턴으로 복제된다(#Y 이중 출현 버그).
+_LEAD = re.compile(r"^(?:&[0-9A-Za-z]|[ \t　])*")
+
+
+def _split_lead(line: str) -> tuple:
+    """줄머리의 색상코드/들여쓰기 run 과 본문을 분리."""
+    m = _LEAD.match(line)
+    return m.group(0), line[m.end():]
+
+
+def _tokenize(text: str) -> list:
+    """줄 목록 → [("raw", 줄)] 또는 [("grp", (줄들, 줄사이 빈줄 수))] 토큰열.
+
+    문장 종결로 끝나지 않는 줄은 다음 줄과 한 grp 로 묶는다. 작가가 문장 중간
+    줄바꿈에 더해 줄 사이에 빈 줄(더블 스페이싱)을 끼우기도 하므로, 문장이
+    미완결이면 빈 줄을 건너서 계속 병합하고 그 간격(gaps)을 기억해 재현한다.
+    코드/공백뿐인 줄(&B 단독 등)은 그룹에 넣지 않고 raw 로 보존한다."""
+    tokens, buf, gaps, pending = [], [], [], []
+
+    def flush():
+        nonlocal buf, gaps
+        if buf:
+            tokens.append(("grp", (buf, gaps)))
+            buf, gaps = [], []
+
+    for ln in text.split("\n"):
+        if not ln.strip():                      # 진짜 빈 줄 — 그룹 내부 간격일 수 있음
+            if buf:
+                pending.append(ln)
+            else:
+                tokens.append(("raw", ln))
+            continue
+        body = _split_lead(ln)[1].strip()
+        if not body or _NAMEPAT.fullmatch(body):
+            # 코드 단독 줄(&B)·토큰 단독 줄(#I 화자 캡션) — 문장이 아니므로 그룹을 끊고
+            # 그대로 보존한다. (빈 줄과 달리 gap 으로 흡수하면 내용이 유실된다)
+            flush()
+            tokens.extend(("raw", p) for p in pending)
+            pending = []
+            tokens.append(("raw", ln))
+            continue
+        if buf and pending and not buf[-1].rstrip().endswith(_CONT_END):
+            # 빈 줄을 건너는 병합은 조사/쉼표로 끝날 때만 — 목록 항목 오병합 방지
+            flush()
+            tokens.extend(("raw", p) for p in pending)
+            pending = []
+        if buf:
+            gaps.append(len(pending)); pending = []
+        buf.append(ln)
+        if ln.rstrip().endswith(_SENT_END):
+            flush()
+    flush()
+    for ln in pending:                  # 그룹이 끝난 뒤 남은 빈/코드 줄
+        tokens.append(("raw", ln))
+    return tokens
+
+
+def _grp_body(lines: List[str]) -> str:
+    """grp 의 번역 원문: 줄머리 코드/들여쓰기를 뗀 본문을 이어 붙인다(일본어는 무공백 연결)."""
+    return "".join(_split_lead(ln)[1].rstrip() for ln in lines)
+
+
+def _display_width(s: str) -> int:
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in s)
+
+
+def _wrap(body: str, width: int, lead0: str, lead_cont: str) -> List[str]:
+    """번역문을 표시폭 width 안에서 어절 단위로 줄바꿈. 첫 줄은 lead0,
+    이후 줄은 lead_cont(원문 연속 줄의 들여쓰기 패턴)를 붙인다."""
+    out: List[str] = []
+    cur, lead = lead0, lead0
+    for word in body.split(" "):
+        while word:                                 # 한 어절이 폭을 넘으면 강제 분절
+            cand = cur + (" " if cur != lead else "") + word if cur != lead else cur + word
+            if _display_width(cand) <= width:
+                cur = cand
+                word = ""
+            elif cur == lead:                       # 빈 줄인데도 안 들어감 → 글자 단위로 자름
+                k = len(word)
+                while k > 1 and _display_width(cur + word[:k]) > width:
+                    k -= 1
+                cur += word[:k]
+                word = word[k:]
+                out.append(cur); lead = lead_cont; cur = lead
+            else:
+                out.append(cur); lead = lead_cont; cur = lead
+    if cur != lead or not out:
+        out.append(cur)
+    return out
+
+
 def translate_texts(texts: List[str], key: Optional[str] = None, region: Optional[str] = None,
                     progress: Optional[Callable[[int, int], None]] = None,
                     fallback: str = "skip") -> Dict[str, str]:
@@ -233,34 +362,87 @@ def translate_texts(texts: List[str], key: Optional[str] = None, region: Optiona
     if not region:
         raise AzureError("Azure 지역이 없습니다. tools/.azure_key 2번째 줄에 지역(예: koreacentral)을 적으세요.")
     uniq = list(dict.fromkeys(t for t in texts if t and t.strip()))
-    masked = {t: _mask_names(t) for t in uniq}      # 원문 → (이름 치환문, 사용한 이름들)
-    lines = list(dict.fromkeys(
-        ln for t in uniq for ln in masked[t][0].split("\n") if ln.strip()))
-    trans: Dict[str, str] = {}
-    for s in range(0, len(lines), BATCH):
-        chunk = lines[s: s + BATCH]
-        res = _call(key, region, [_mask(ln) for ln in chunk])
+    toks = {t: _tokenize(t) for t in uniq}
+    # 번역 단위 = grp 본문(문장 중간 줄바꿈을 이어 붙인 것). 동일 본문은 한 번만.
+    bodies: List[str] = []
+    for t in uniq:
+        for kind, v in toks[t]:
+            if kind == "grp":
+                b = _grp_body(v[0])
+                if b.strip():
+                    bodies.append(b)
+    bodies = list(dict.fromkeys(bodies))
+    masked_bodies = {b: _mask_names(b) for b in bodies}     # 본문 → (이름 치환문, 이름들)
+    send = [masked_bodies[b][0] for b in bodies]
+    trans_raw: Dict[str, str] = {}
+    for s in range(0, len(send), BATCH):
+        chunk = send[s: s + BATCH]
+        res = _call(key, region, [_mask(x) for x in chunk])
         if len(res) != len(chunk):
             raise AzureError(f"응답 개수 불일치: 요청 {len(chunk)} vs 응답 {len(res)}")
-        trans.update(zip(chunk, (_unmask(r) for r in res)))
+        trans_raw.update(zip(chunk, (_unmask(r) for r in res)))
         if progress:
-            progress(min(s + BATCH, len(lines)), len(lines))
+            progress(min(s + BATCH, len(send)), len(send))
+    trans: Dict[str, tuple] = {}                            # 본문 → (번역, 복원성공)
+    for b in bodies:
+        mb, used = masked_bodies[b]
+        d, ok = _unmask_names(trans_raw.get(mb, mb), used)  # 음차된 이름 → 원 토큰
+        trans[b] = (d, ok)
     out: Dict[str, str] = {}
     failed: List[str] = []
     for src in uniq:
-        msrc, used = masked[src]
-        dst = "\n".join(trans.get(ln, ln) for ln in msrc.split("\n"))  # 빈 줄은 그대로 보존
-        dst, ok = _unmask_names(dst, used)          # 음차된 이름 → 원 토큰
+        pieces: List[str] = []
+        ok_all = True
+        for kind, v in toks[src]:
+            if kind == "raw":                       # 빈 줄/코드 단독 줄 — 그대로 보존
+                pieces.append(v)
+                continue
+            g_lines, g_gaps = v
+            body = _grp_body(g_lines)
+            if not body.strip():
+                pieces.extend(g_lines)
+                continue
+            d, ok = trans.get(body, (body, True))
+            ok_all = ok_all and ok
+            # 짝이 안 맞는 여는/닫는 괄호를 Azure 가 버리는 것을 grp 단위로 복원
+            for op, cl in (("「", "」"), ("『", "』"), ("（", "）")):
+                if body.startswith(op) and not d.startswith(op) and d.count(op) < body.count(op):
+                    d = op + d
+                if body.rstrip().endswith(cl) and not d.rstrip().endswith(cl) \
+                        and d.count(cl) < body.count(cl):
+                    d = d.rstrip() + cl
+            lead0 = _split_lead(g_lines[0])[0]
+            if len(g_lines) == 1:                   # 한 줄 문장 — 레이아웃 유지
+                pieces.append(lead0 + d)
+            else:                                   # 합쳐 번역한 문장 — 원문 폭 안에서 재줄바꿈
+                width = max(_display_width(ln) for ln in g_lines)
+                lead_cont = _split_lead(g_lines[1])[0]
+                # 연속 줄 들여쓰기에 전각공백이 있으면 곁들여진 반각공백은 제거 —
+                # 원문의 일본어 글자 정렬용 반각(예: "　 数日")이 재줄바꿈된 모든
+                # 연속 줄에 퍼지는 것을 막는다. 반각만으로 들여쓴 원문은 그대로 둔다.
+                if "　" in lead_cont:
+                    lead_cont = lead_cont.replace(" ", "").replace("\t", "")
+                wrapped = _wrap(d, width, lead0, lead_cont)
+                # 원문 줄 사이 간격(더블 스페이싱 등)을 최빈값으로 재현
+                sep = max(set(g_gaps), key=g_gaps.count) if g_gaps else 0
+                for i, wl in enumerate(wrapped):
+                    pieces.append(wl)
+                    if i < len(wrapped) - 1:
+                        pieces.extend([""] * sep)
+        dst = "\n".join(pieces)
         dst = deepl._restore_quotes(src, dst)       # 원문에 없는 '' "" 억제 / 「」『』 복원
-        dst = deepl._restore_indent(src, dst)       # 줄머리 전각공백 들여쓰기 복원
+        # deepl._restore_indent 는 쓰지 않는다 — 그쪽 _LEADRUN 은 #X 를 줄머리 코드로
+        # 취급해 원문 줄머리 "　#Y" 를 통째로 이식, #Y 가 이중으로 붙는다. 들여쓰기는
+        # 위 재조립(lead0/lead_cont)이 이미 원문 기준으로 처리했다.
         dst = deepl._restore_vars(src, dst)         # $...$ 변수 참조 원문 복원
         dst = deepl._restore_color_space(src, dst)  # 색상코드 뒤 덧붙은 반각공백 제거
         dst = deepl._restore_ellipsis(src, dst)     # ASCII '...' → 전각 '…' 복원
-        # 괄호 복원은 반드시 _restore_quotes(따옴표→「」 환원) 뒤에 — 앞이면 」가 이중으로 붙는다
-        dst = "\n".join(_fix_line(s_ln, d_ln)
-                        for s_ln, d_ln in zip(src.split("\n"), dst.split("\n")))
+        # 괄호 복원은 _restore_quotes 뒤에, 그리고 줄 수가 유지된 경우에만 줄 단위 적용
+        s_lines, d_lines = src.split("\n"), dst.split("\n")
+        if len(s_lines) == len(d_lines):
+            dst = "\n".join(_fix_line(a, b) for a, b in zip(s_lines, d_lines))
         out[src] = dst
-        if not ok:
+        if not ok_all:
             failed.append(src)
     if failed:
         if fallback == "deepl":
