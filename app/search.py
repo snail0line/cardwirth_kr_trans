@@ -12,9 +12,10 @@ from . import textcodec
 
 
 def search_units(proj: Dict[str, Any], query: str, scope: str = "both",
-                 cap: int = 300) -> List[dict]:
+                 cap: int = 300, include_control: bool = False) -> List[dict]:
     """query 를 자유 텍스트의 jp/ko 에서 부분검색(대소문자 무시).
-    scope: 'both'|'jp'|'ko'. 반환: [{rel,sid,cat,speaker,jp,ko,in_jp,in_ko}]."""
+    scope: 'both'|'jp'|'ko'. include_control: 제어기호/치환자뿐 유닛 포함(%변수% 사용처 점프용).
+    반환: [{rel,sid,cat,speaker,jp,ko,in_jp,in_ko}]."""
     q = (query or "").strip()
     if not q:
         return []
@@ -24,7 +25,7 @@ def search_units(proj: Dict[str, Any], query: str, scope: str = "both",
     out: List[dict] = []
     for rel, f in proj["files"].items():
         for u in f["units"]:
-            if u["kind"] != "free" or u.get("control"):
+            if u["kind"] != "free" or (u.get("control") and not include_control):
                 continue
             jp = textcodec.decode(u["jp"])
             ko = textcodec.decode(u.get("ko", ""))

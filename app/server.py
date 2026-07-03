@@ -201,7 +201,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "no project"}, 404)
             query = q.get("q", [""])[0]
             scope = q.get("scope", ["both"])[0]
-            return self._json({"results": search.search_units(p, query, scope)})
+            inc_ctrl = q.get("ctrl", ["0"])[0] == "1"
+            return self._json({"results": search.search_units(p, query, scope,
+                                                              include_control=inc_ctrl)})
         if u.path == "/api/overflow":
             p = STATE["proj"]
             if not p:
@@ -386,7 +388,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "no project"}, 400)
             scope = data.get("scope", "all")
             cur_rel = data.get("rel", "")
-            res = overflow.tidy_overflow(p, scope, cur_rel)
+            mode = data.get("mode", "full")     # "full"=상세 정돈 / "simple"=끝 빈 줄만
+            res = overflow.tidy_overflow(p, scope, cur_rel, mode=mode)
             project.save(p)
             return self._json({"ok": True, **res, "stats": _stats()})
 

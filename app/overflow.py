@@ -78,9 +78,20 @@ def tidy_text(text: str) -> str:
     return "\n".join(out)
 
 
-def tidy_overflow(proj: Dict[str, Any], scope: str = "all", cur_rel: str = "") -> Dict[str, Any]:
+def tidy_trailing(text: str) -> str:
+    """끝의 빈 줄만 제거 — '간단 정돈'. 줄바꿈(레이아웃)은 일절 건드리지 않는다."""
+    lines = (text or "").split("\n")
+    while lines and lines[-1].strip() == "":
+        lines.pop()
+    return "\n".join(lines)
+
+
+def tidy_overflow(proj: Dict[str, Any], scope: str = "all", cur_rel: str = "",
+                  mode: str = "full") -> Dict[str, Any]:
     """넘치는(8줄 초과) 번역 대사를 정돈해 저장 대상 proj 를 갱신. 반환: {tidied, still_over}.
-    실제로 줄 수가 준 유닛만 손대고, 정돈해도 여전히 넘치는 수도 함께 돌려준다."""
+    실제로 줄 수가 준 유닛만 손대고, 정돈해도 여전히 넘치는 수도 함께 돌려준다.
+    mode: "full"=문단 안 수동 줄바꿈 제거+끝 빈 줄 제거(상세) / "simple"=끝 빈 줄만(간단)."""
+    tidy = tidy_text if mode == "full" else tidy_trailing
     tidied = 0
     still_over = 0
     for rel, f in proj["files"].items():
@@ -97,7 +108,7 @@ def tidy_overflow(proj: Dict[str, Any], scope: str = "all", cur_rel: str = "") -
             units = LINE_UNITS_IMG if u.get("img") else LINE_UNITS
             if wrap_rows(ko, units) <= WRAP_ROWS:
                 continue
-            new = tidy_text(ko)
+            new = tidy(ko)
             if new != ko:
                 u["ko"] = textcodec.encode_field(u["field"], new)
                 tidied += 1
