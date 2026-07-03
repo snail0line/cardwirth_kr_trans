@@ -2,9 +2,13 @@
 """시나리오 XML 폴더 → 번역 프로젝트(dict) 추출."""
 from __future__ import annotations
 import os
+import re
 from typing import Dict, Any
 
 from . import xmlio, schema, context, flowcond
+
+# %상태변수% 표시 참조 (예: %02/食事済？%)
+_DISPVAR = re.compile(r"%([^%\n]+)%")
 
 GSEP = "\x1f"  # glossary key 구분자
 
@@ -21,6 +25,19 @@ def _nearest(ancestors, tag):
     return None
 
 
+def _collect_display_vars(scenario_dir: str, rels) -> set:
+    """전 파일에서 %이름% 표시 참조를 수집. 여기 등장하는 상태변수의 표시값(True/False/
+    Value)만 번역 대상 — 나머지 변수의 표시값은 로직 전용이라 플레이어에게 안 보인다."""
+    names = set()
+    for rel in rels:
+        try:
+            with open(os.path.join(scenario_dir, rel), encoding="utf-8") as f:
+                names.update(_DISPVAR.findall(f.read()))
+        except (OSError, UnicodeDecodeError):
+            pass
+    return names
+
+
 def extract_project(scenario_dir: str) -> Dict[str, Any]:
     scenario_dir = os.path.abspath(scenario_dir)
     proj: Dict[str, Any] = {
@@ -29,8 +46,10 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
         "files": {},      # rel -> {units:[...]}
     }
     glossary = proj["glossary"]
+    rels = xmlio.find_xml_files(scenario_dir)
+    display_vars = _collect_display_vars(scenario_dir, rels)
 
-    for rel in xmlio.find_xml_files(scenario_dir):
+    for rel in rels:
         tree = xmlio.parse_file(os.path.join(scenario_dir, rel))
         root = tree.getroot()
         # 이벤트 흐름을 따라가 각 대사의 '도달 조건'(쿠폰 분기 등)을 정확히 계산
@@ -48,12 +67,26 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
                     "etype": slot.etype, "jp": slot.value, "gkey": k,
                 })
             else:
+                # 플래그/스텝 표시값: %이름% 으로 실제 표시되는 변수만 번역 대상.
+                # (슬롯 sid 는 그대로 소비되므로 repack/dupchoice 와 정합 유지)
+                vname = ""
+                if (slot.tag, slot.parent) in schema.FREE_VALUE_TAGS:
+                    holder = ancestors[-1] if ancestors else None
+                    vname = (holder.findtext("Name") or "").strip() if holder is not None else ""
+                    if vname not in display_vars:
+                        continue
                 u = {
                     "id": sid, "field": slot.field, "tag": slot.tag,
                     "parent": slot.parent, "kind": "free",
                     "jp": slot.value, "ko": "",
-                    "control": schema.is_control_label(slot.value),
+                    "control": schema.is_control_label(slot.value)
+                    or schema.is_tokens_only(slot.value),   # 코드/치환자뿐 → 읽기전용
                 }
+                if vname:
+                    u["varname"] = vname                    # 표시값 → 사용처 점프용
+                refs = sorted(set(_DISPVAR.findall(slot.value)))
+                if refs:
+                    u["varrefs"] = refs                     # %변수% 참조 → 정의 점프용
                 # 대사 컨텍스트: 화자 / 분기조건(파벌·플래그·스텝) / 말투
                 sp = ""
                 if slot.field == "#text" and slot.tag == "Text":
@@ -102,16 +135,25 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
                     u["cat"] = "dialogue" if sp else "narration"
                 elif slot.tag == "Description":
                     u["cat"] = "desc"
+                elif (slot.tag, slot.parent) in schema.FREE_VALUE_TAGS:
+                    u["cat"] = "varvalue"           # 플래그/스텝 표시값 (%상태변수% 로 표시)
                 elif slot.tag == "Name":
                     root_tag = ancestors[0].tag if ancestors else ""
                     parent_tag = ancestors[-1].tag if ancestors else ""
-                    # Package/Area/Battle 의 최상위 Property/Name = 내부 이벤트명(플레이어 비노출)
-                    if parent_tag == "Property" and root_tag in ("Package", "Area", "Battle"):
+                    # Package/Area/Battle "자체"의 Property/Name(루트 직속, len==2)만
+                    # 내부 이벤트명(플레이어 비노출) = sysname. 같은 파일이라도 더 깊은
+                    # Property/Name(Area>MenuCards>MenuCard>Property>Name 등)은 게임에
+                    # 표시되는 카드 이름이므로 번역 대상(label)이다.
+                    if parent_tag == "Property" and root_tag in ("Package", "Area", "Battle") \
+                            and len(ancestors) == 2:
                         u["cat"] = "sysname"
                     else:
                         u["cat"] = "label"
                 else:
                     u["cat"] = "label"
+                if u["cat"] == "sysname":
+                    continue    # 내부명(에어리어/배틀/패키지 자체 이름)은 플레이어 비노출
+                                # (디버거·플레이 로그 전용) — 번역툴에 아예 노출하지 않음
                 units.append(u)
         # 멤버가 1개뿐인 그룹은 묶을 필요 없음 → group 키 제거(단독 유닛으로 표시)
         gcount: Dict[int, int] = {}

@@ -59,8 +59,15 @@ ENTITY_ATTR_BY_TAG = {
 
 # ── 자유 텍스트: 요소 텍스트(#text) ────────────────────────────────────────
 # 항상 자유 텍스트인 tag
-# (Value = 스텝 값 라벨. 플래그/스텝과 같은 내부 로직 라벨이라 번역 대상에서 제외 — 사용자 결정)
 FREE_TEXT_TAGS = {"Text", "Description"}
+# 플래그/스텝의 "표시값" — %상태변수% 로 메시지에 삽입돼 플레이어에게 보이는 텍스트일 수
+# 있어 번역 대상(2026-07-04 사용자 결정으로 포함 전환. 예: Flag False 값에 문장을 넣고
+# %02/食事済？% 로 표시하는 시나리오). 로직 식별자는 Name 이라 표시값 번역은 안전.
+# ＴＲＵＥ/숫자 같은 제어성 라벨은 is_nontext_label 로 걸러 노이즈를 줄인다.
+# ⚠ 슬롯 생성은 무조건(상태 없는 규칙 — sid 정합성), "%이름% 으로 실제 표시되는
+# 변수인지" 필터는 extract.py 가 유닛 등록 단계에서 한다(표시 안 되는 변수의 값은
+# 로직 전용이라 번역 대상이 아님 — 사용자 설계).
+FREE_VALUE_TAGS = {("True", "Flag"), ("False", "Flag"), ("Value", "Step")}
 # 컨텍스트로 자유 텍스트가 되는 tag: <Name> (부모가 Flag/Step 이 아니면 제목류)
 FREE_NAME_TAG = "Name"
 
@@ -83,6 +90,15 @@ _FULLWIDTH_DIGITS = "０１２３４５６７８９"
 # CWXEditor/CardWirthPy 가 미사용 슬롯에 자동으로 채우는 더미 값.
 #  예: 'Ｓｔｅｐ - 3', 'Step - 9', 'Ｆｌａｇ - 1' → 번역 대상 아님
 _FILLER_RE = re.compile(r"^(?:Ｓｔｅｐ|Step|Ｆｌａｇ|Flag)\s*[-－]\s*[0-9０-９]+$")
+
+# 제어코드/치환자/변수 — 이것들(과 공백)뿐인 텍스트는 번역할 내용이 없다.
+#  예: "&B\n　%02/食事済？%" (상태변수 표시 전용 메시지)
+# raw XML 의 #text 는 줄바꿈이 CardWirth 이스케이프(백슬래시+n 두 글자)라 그것도 걷어낸다.
+_TOKEN_RE = re.compile(r"\\n|&[A-Za-z]|#[0-9A-Za-z]|\$[^$\n]*\$|%[^%\n]*%")
+
+
+def is_tokens_only(value: str) -> bool:
+    return not _TOKEN_RE.sub("", value or "").strip()
 
 
 def is_filler_value(value: str) -> bool:
@@ -132,10 +148,15 @@ def slot_for_text(tag: str, parent: Optional[str], text: Optional[str]) -> Optio
     # 자동생성 더미값(Ｓｔｅｐ - N 등)은 번역 대상 아님
     if is_filler_value(val):
         return None
+    # (제어코드/치환자뿐인 텍스트도 슬롯은 만든다 — extract 가 control 표시하고
+    #  UI 가 읽기전용 + 변수 정의로 점프하는 링크를 붙인다)
     # 자유 텍스트
     if tag in FREE_TEXT_TAGS:
         return Slot("#text", tag, parent, "free", None, _norm_text(text))
     if tag == FREE_NAME_TAG and parent not in ("Flag", "Step"):
+        return Slot("#text", tag, parent, "free", None, _norm_text(text))
+    # 플래그/스텝 표시값 — 제어성 라벨(ＴＲＵＥ/숫자/기호)은 제외
+    if (tag, parent) in FREE_VALUE_TAGS and not is_nontext_label(val):
         return Slot("#text", tag, parent, "free", None, _norm_text(text))
     return None
 
