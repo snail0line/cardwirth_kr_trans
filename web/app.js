@@ -833,6 +833,39 @@ async function loadDeeplUsage() {
     · 남음 <b>${r.remaining.toLocaleString()}</b>자
     <span class="deepl-bar"><span style="width:${Math.min(100, pct)}%"></span></span>`;
 }
+function curEngine() {
+  const r = document.querySelector('input[name="mtEngine"]:checked');
+  return r ? r.value : "deepl";
+}
+function renderAzureKeyStat(d) {
+  const el = $("#azureKeyStat");
+  if (!el) return;
+  if (d && d.set) {
+    el.textContent = "● 설정됨 (" + (d.region || "지역 미상") + ")";
+    el.className = "hint deepl-ok";
+  } else {
+    el.textContent = "○ 미설정 — 키를 저장하세요";
+    el.className = "hint deepl-no";
+  }
+}
+async function loadAzureUsage() {
+  const el = $("#azureUsage");
+  if (!el) return;
+  el.textContent = "사용량 집계 중…";
+  const r = await api("/api/azure_usage");
+  if (r.error) { el.textContent = "사용량: 조회 실패 (" + r.error + ")"; el.className = "deepl-usage err"; return; }
+  const pct = r.limit ? Math.round((r.count / r.limit) * 100) : 0;
+  el.className = "deepl-usage";
+  el.innerHTML = `이번 달 사용 <b>${r.count.toLocaleString()}</b> / ${r.limit.toLocaleString()}자 (${pct}%)
+    · 남음 <b>${r.remaining.toLocaleString()}</b>자 <span class="hint">· 이 툴에서 보낸 분량 기준 자체 집계</span>
+    <span class="deepl-bar"><span style="width:${Math.min(100, pct)}%"></span></span>`;
+}
+function applyEngineUi() {
+  const az = curEngine() === "azure";
+  $("#deeplKeySec").style.display = az ? "none" : "";
+  $("#azureKeySec").style.display = az ? "" : "none";
+  if (az) loadAzureUsage();
+}
 async function showDeepl() {
   if (!STATE.open) return toast("먼저 시나리오를 여세요");
   $("#deepl").style.display = "flex";
@@ -842,8 +875,10 @@ async function showDeepl() {
     ? "📄 현재 파일만 (" + STATE.curRel.split(/[\\/]/).pop() + ")" : "📄 현재 파일만 (없음)";
   const s = await api("/api/state");
   renderDeeplKeyStat(s.deepl);
+  renderAzureKeyStat(s.azure);
   if (s.deepl && s.deepl.set) loadDeeplUsage();
   else $("#deeplUsage").textContent = "";
+  applyEngineUi();
   runDeeplCount();
 }
 function closeDeepl() { $("#deepl").style.display = "none"; }
@@ -877,22 +912,35 @@ async function saveDeeplKey() {
   if (r.set) loadDeeplUsage();
   toast("키 저장됨");
 }
+async function saveAzureKey() {
+  const key = $("#azureKey").value.trim();
+  const region = $("#azureRegion").value.trim();
+  if (!key) return toast("키를 입력하세요");
+  const r = await post("/api/azure_key", { key, region });
+  if (r.error) return toast("오류: " + r.error);
+  $("#azureKey").value = "";
+  renderAzureKeyStat(r);
+  toast("키 저장됨");
+}
 async function runDeeplDraft(scope) {
   const overwrite = $("#deeplOverwrite").checked;
   const rel = scope === "file" ? STATE.curRel : null;
   if (scope === "file" && !rel) return toast("먼저 파일을 여세요");
-  const btns = ["#deeplDraftFile", "#deeplDraftAll", "#deeplKeySave"];
+  const btns = ["#deeplDraftFile", "#deeplDraftAll", "#deeplKeySave", "#azureKeySave"];
   btns.forEach((b) => ($(b).disabled = true));
   $("#deeplResult").textContent = "번역 중… (문장 수에 따라 수십 초 걸릴 수 있어요)";
-  const r = await post("/api/deepl_draft", { rel, overwrite });
+  const ep = curEngine() === "azure" ? "/api/azure_draft" : "/api/deepl_draft";
+  const r = await post(ep, { rel, overwrite });
   btns.forEach((b) => ($(b).disabled = false));
   $("#deeplDraftFile").disabled = !STATE.curRel;
   if (r.error) { $("#deeplResult").textContent = "오류: " + r.error; return; }
   const x = r.result;
   $("#deeplResult").textContent =
-    `완료: ${x.translated}개 초안 생성 (고유 ${x.unique}문장 · ${x.chars.toLocaleString()}자 전송)`;
+    `완료: ${x.translated}개 초안 생성 (고유 ${x.unique}문장 · ${x.chars.toLocaleString()}자 전송)` +
+    (x.skipped ? ` · 복원 실패 ${x.skipped}문장은 빈 칸 (DeepL 초안으로 채우세요)` : "");
   renderProgress(r.stats);
   loadDeeplUsage();
+  if (curEngine() === "azure") loadAzureUsage();
   runDeeplCount();               // 초안 채운 뒤 남은 분량 갱신
   await refreshState();
   if (STATE.curRel) openFile(STATE.curRel);
@@ -1002,6 +1050,10 @@ $("#btnTerms").onclick = showTerms;
 $("#btnDeepl").onclick = showDeepl;
 $("#deeplClose").onclick = closeDeepl;
 $("#deeplKeySave").onclick = saveDeeplKey;
+$("#azureKeySave").onclick = saveAzureKey;
+document.querySelectorAll('input[name="mtEngine"]')
+  .forEach((r) => r.addEventListener("change", applyEngineUi));
+$("#azureKey").addEventListener("keydown", (e) => { if (e.key === "Enter") saveAzureKey(); });
 $("#deeplDraftFile").onclick = () => runDeeplDraft("file");
 $("#deeplDraftAll").onclick = () => runDeeplDraft("all");
 $("#deeplOverwrite").addEventListener("change", runDeeplCount);   // 덮어쓰기 토글 시 분량 재계산
