@@ -4,6 +4,8 @@ projects/
 _export_test/
 *.log
 *deepl_key*
+*azure_key*
+*azure_usage*
 
 # 제3자 시나리오(저작권) — 배포물에 포함하지 않음
 test_scenario/
