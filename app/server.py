@@ -13,7 +13,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, search, overflow, dupchoice, update
+from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, azure_mt, search, overflow, dupchoice, update
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 HOST, PORT = "127.0.0.1", 8765
@@ -178,6 +178,7 @@ class Handler(BaseHTTPRequestHandler):
                 "stats": _stats(),
                 "files": _file_summaries(),
                 "deepl": deepl.key_status(),
+                "azure": azure_mt.key_status(),
                 "version": update.local_version(),
             })
         if u.path == "/api/file":
@@ -253,6 +254,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, **deepl.usage()})
             except deepl.DeepLError as e:
                 return self._json({"error": str(e)}, 502)
+
+        if u.path == "/api/azure_usage":
+            return self._json({"ok": True, **azure_mt.usage()})
 
         if u.path == "/api/deepl_count":
             p = STATE["proj"]
@@ -430,6 +434,32 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 res = deepl.draft_units(p, rel=rel, overwrite=bool(data.get("overwrite")))
             except deepl.DeepLError as e:
+                return self._json({"error": str(e)}, 502)
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
+            project.save(p)
+            return self._json({"ok": True, "result": res, "stats": _stats()})
+
+        if u.path == "/api/azure_key":
+            key = (data.get("key") or "").strip()
+            region = (data.get("region") or "").strip()
+            if not key:
+                return self._json({"error": "키를 입력하세요"}, 400)
+            try:
+                azure_mt.save_key(key, region)
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
+            return self._json({"ok": True, **azure_mt.key_status()})
+
+        if u.path == "/api/azure_draft":
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            rel = data.get("rel") or None      # 없으면 전체
+            if rel and rel not in p["files"]:
+                return self._json({"error": f"파일 없음: {rel}"}, 404)
+            try:
+                res = azure_mt.draft_units(p, rel=rel, overwrite=bool(data.get("overwrite")))
+            except azure_mt.AzureError as e:
                 return self._json({"error": str(e)}, 502)
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
