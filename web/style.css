@@ -88,7 +88,8 @@ input[type=text] {
   border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px;
 }
 .unit.done { border-color: #bbf7d0; }
-.unit.control { opacity: 0.55; }
+/* 제어기호 유닛 — 본문/입력칸만 흐리게. 배지·버튼(완료로 표시 등)은 또렷하게 유지 */
+.unit.control .jp, .unit.control textarea { opacity: 0.55; }
 .unit .jp { white-space: pre-wrap; word-break: break-word; color: #374151; line-height: 1.55; }
 .unit .meta { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
 .unit .badge {
@@ -103,6 +104,12 @@ input[type=text] {
 .unit .badge.cat-choice { background: #fef3c7; color: #b45309; font-weight: 700; }
 .unit .badge.cat-label, .unit .badge.cat-desc { background: #f3f4f6; color: #6b7280; font-weight: 700; }
 .unit .badge.cat-sysname { background: #f3f4f6; color: #9ca3af; font-weight: 700; }
+.unit .badge.cat-varvalue { background: #ccfbf1; color: #0f766e; font-weight: 700; }
+.unit .badge.varjump { background: #eff6ff; color: #2563eb; cursor: pointer; font-weight: 600; }
+.unit .badge.varjump:hover { background: #dbeafe; text-decoration: underline; }
+.unit .badge.varflag-true { background: #dcfce7; color: #15803d; font-weight: 700; }
+.unit .badge.varflag-false { background: #fee2e2; color: #b91c1c; font-weight: 700; }
+.unit .badge.varflag-step { background: #fef3c7; color: #b45309; font-weight: 700; }
 .unit .badge.tone { background: #fef3c7; color: #b45309; font-weight: 600; }
 .unit .badge.img { background: #ede9fe; color: #6d28d9; font-weight: 600; }
 
@@ -303,6 +310,8 @@ input[type=text] {
 .search-bar input { flex: 1; }
 .search-bar select { flex: 0 0 130px; }
 .search-results { overflow-y: auto; flex: 1; padding: 8px 16px; }
+/* 경고 패널: 결과 없는 섹션은 내용 높이만큼만 차지하고 나머지 섹션에 공간을 양보 */
+.search-results.is-empty { flex: 0 0 auto; }
 .search-count { font-size: 12px; color: #6b7280; padding: 4px 0 8px; }
 .warn-section-title { font-size: 13px; font-weight: 700; color: #374151; margin: 12px 0 4px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
 .warn-section-title:first-child { margin-top: 0; }

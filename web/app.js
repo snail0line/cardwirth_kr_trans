@@ -210,7 +210,8 @@ async function openScenario() {
 
 function unitVisible(u) {
   if ($("#hideDone").checked && u.ko) return false;
-  if ($("#hideControl").checked && u.control) return false;
+  // %상태변수% 를 표시하는 메시지는 control(읽기전용)이라도 맥락 확인용으로 항상 표시
+  if ($("#hideControl").checked && u.control && !(u.varrefs && u.varrefs.length)) return false;
   return true;
 }
 
@@ -386,7 +387,7 @@ function freeUnitEl(rel, u, skipAlt) {
   const el = document.createElement("div");
   el.className = "unit" + (u.ko ? " done" : "") + (u.control ? " control" : "");
   el.dataset.sid = u.id;
-  const CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "제목", desc: "설명", sysname: "내부명" };
+  const CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "제목", desc: "설명", sysname: "내부명", varvalue: "변수값" };
   const catBadge = u.cat ? `<span class="badge cat-${u.cat}">${CAT[u.cat] || u.cat}</span>` : "";
   const left = document.createElement("div");
   const spk = u.speaker ? `<span class="badge spk">🗣 ${esc(u.speaker)}</span>` : "";
@@ -396,6 +397,37 @@ function freeUnitEl(rel, u, skipAlt) {
   const imgB = u.img ? '<span class="badge img" title="그림이 떠서 한 줄 폭이 좁음 (43→33단위)">🖼 그림·33</span>' : "";
   left.innerHTML = `<div class="meta">${catBadge}${spk}${conds}${tone}${ctrl}${imgB}</div>
     <div class="jp"></div>`;
+  // %상태변수% 상호 점프 — 참조하는 쪽은 정의(Summary.xml)로, 표시값은 사용처로
+  const meta = left.querySelector(".meta");
+  (u.varrefs || []).forEach((name) => {
+    const b = document.createElement("span");
+    b.className = "badge varjump";
+    b.textContent = `%${name}% 정의↗`;
+    b.title = "Summary.xml 의 이 상태변수 표시값(True/False)으로 이동";
+    b.onclick = () => jumpToVarDef(name);
+    meta.appendChild(b);
+  });
+  if (u.cat === "varvalue" && u.varname) {
+    const nameB = document.createElement("span");
+    nameB.className = "badge ent";
+    nameB.textContent = `%${u.varname}%`;
+    nameB.title = "이 텍스트가 표시값으로 들어가는 상태변수";
+    meta.appendChild(nameB);
+    const flagB = document.createElement("span");
+    const kind = u.tag === "True" ? "true" : u.tag === "False" ? "false" : "step";
+    flagB.className = "badge varflag-" + kind;
+    flagB.textContent = u.tag === "True" ? "TRUE 값" : u.tag === "False" ? "FALSE 값" : "스텝 값";
+    flagB.title = u.tag === "Value"
+      ? `스텝 %${u.varname}% 의 값 라벨`
+      : `%${u.varname}% 가 ${u.tag.toUpperCase()} 일 때 표시되는 텍스트`;
+    meta.appendChild(flagB);
+    const b = document.createElement("span");
+    b.className = "badge varjump";
+    b.textContent = "사용처↗";
+    b.title = `%${u.varname}% 가 표시되는 대사로 이동`;
+    b.onclick = () => jumpToVarUsage(u.varname);
+    meta.appendChild(b);
+  }
   if (!skipAlt) {
     const alt = condAltEl(u);
     if (alt) left.querySelector(".meta").appendChild(alt);
@@ -406,12 +438,18 @@ function freeUnitEl(rel, u, skipAlt) {
   // 원문을 미리 넣어 둔다 → 줄바꿈/띄어쓰기 그대로 두고 일본어만 한국어로 고쳐 쓰기
   ta.value = u.ko || u.jp;
   ta.placeholder = "여기에서 일본어만 한국어로 고쳐 쓰세요";
+  if (u.control) {
+    ta.disabled = true;                 // 제어기호/치환자뿐 — 번역할 내용 없음(읽기전용)
+    ta.title = "제어코드·치환자뿐인 텍스트라 번역하지 않습니다";
+  }
 
   // ko 변경을 서버에 반영 (onblur·되돌리기 공용)
+  let markDoneBtn = null;   // [완료로 표시] — 완료 상태에 따라 표시/숨김
   const commit = async (newKo) => {
     if (newKo === (u.ko || "")) return;
     u.ko = newKo;
     el.classList.toggle("done", !!u.ko);
+    if (markDoneBtn) markDoneBtn.style.display = u.ko ? "none" : "";
     const res = await post("/api/set", { kind: "free", rel, id: u.id, ko: newKo });
     renderProgress(res.stats);
     api("/api/state").then((s) => { STATE.files = s.files || []; renderFileList(); });
@@ -538,6 +576,17 @@ function freeUnitEl(rel, u, skipAlt) {
   };
   bar.appendChild(reset);
 
+  // [완료로 표시] — 원문 그대로가 정답인 문장(「～～♪」, %상태변수% 표시 메시지 등)을
+  // 번역 완료로 처리. 입력칸의 blur 규칙("원문과 같으면 미번역")을 우회해 ko 에 명시 저장.
+  markDoneBtn = document.createElement("button");
+  markDoneBtn.type = "button";
+  markDoneBtn.className = "unit-reset";
+  markDoneBtn.textContent = "✓ 완료로 표시";
+  markDoneBtn.title = "원문 그대로 두어도 되는 문장을 번역 완료로 표시합니다 (되돌리기 = ↺ 원문으로)";
+  markDoneBtn.onclick = () => commit(ta.value || u.jp);
+  if (u.ko) markDoneBtn.style.display = "none";
+  bar.appendChild(markDoneBtn);
+
   // "정돈" — 문단 안 수동 줄바꿈을 없애 8줄 넘침을 완화. 메시지창에서 넘칠 때만 노출.
   if (isMsg) {
     tidyBtn = document.createElement("button");
@@ -640,12 +689,33 @@ function renderTermList(host, list, kind) {
 }
 
 // 특정 파일의 특정 문장(sid)으로 이동 + 강조
+// %상태변수% 정의(Summary.xml 표시값)로 이동
+async function jumpToVarDef(name) {
+  const r = await api(`/api/file?rel=${encodeURIComponent("Summary.xml")}`);
+  const hits = (r.units || []).filter((x) => x.varname === name);
+  if (!hits.length) return toast(`Summary.xml 에서 %${name}% 표시값을 못 찾았습니다`);
+  jumpTo("Summary.xml", hits[0].id);
+}
+// %상태변수% 사용처(그 변수가 표시되는 대사)로 이동
+async function jumpToVarUsage(name) {
+  const r = await api(`/api/search?q=${encodeURIComponent(`%${name}%`)}&scope=jp&ctrl=1`);
+  const hits = (r.results || []).filter((m) => m.rel !== "Summary.xml");
+  if (!hits.length) return toast(`%${name}% 사용처를 못 찾았습니다`);
+  jumpTo(hits[0].rel, hits[0].sid);
+}
 async function jumpTo(rel, sid) {
   if (VIEW === "flow") setView("list");
   await openFile(rel);
-  setTimeout(() => {
-    const el = $("#units").querySelector(`.unit[data-sid="${sid}"]`);
-    if (!el) return;
+  setTimeout(async () => {
+    let el = $("#units").querySelector(`.unit[data-sid="${sid}"]`);
+    if (!el && ($("#hideDone").checked || $("#hideControl").checked)) {
+      // 대상이 필터(완료/제어기호 숨기기)에 가려져 있으면 필터를 풀고 다시 찾는다
+      $("#hideDone").checked = false;
+      $("#hideControl").checked = false;
+      await openFile(rel);
+      el = $("#units").querySelector(`.unit[data-sid="${sid}"]`);
+    }
+    if (!el) return toast("대상 문장을 찾지 못했습니다");
     // 접힌 말투 그룹 안의 문장이면 그룹을 펼쳐 보이게 한다
     const body = el.closest(".tg-body");
     if (body && body.style.display === "none") {
@@ -684,7 +754,7 @@ function hl(text, q) {
   try { return safe.replace(new RegExp("(" + escRe(esc(q)) + ")", "ig"), "<mark>$1</mark>"); }
   catch (e) { return safe; }
 }
-const SR_CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "제목", desc: "설명", sysname: "내부명" };
+const SR_CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "제목", desc: "설명", sysname: "내부명", varvalue: "변수값" };
 async function showSearch() {
   if (!STATE.open) return toast("먼저 시나리오를 여세요");
   $("#search").style.display = "flex";
@@ -731,12 +801,15 @@ async function showOverflow() {
   runOverflow();
 }
 function closeOverflow() { $("#overflow").style.display = "none"; }
-async function bulkTidyOverflow() {
+async function bulkTidyOverflow(mode) {
   const scope = $("#overflowScope").value;
   if (scope === "file" && !STATE.curRel) return toast("현재 열린 파일이 없습니다");
   const where = scope === "file" ? "현재 파일의" : "시나리오 전체의";
-  if (!confirm(`${where} 넘치는 대사(8줄 초과)를 정돈합니다.\n문단 안 수동 줄바꿈을 없애 게임 자동 줄바꿈에 맡기고(문단 빈 줄은 유지), 끝의 빈 줄을 제거합니다.\n\n계속할까요?`)) return;
-  const r = await post("/api/overflow_tidy", { scope, rel: STATE.curRel || "" });
+  const what = mode === "simple"
+    ? "줄바꿈은 건드리지 않고 끝의 빈 줄만 제거합니다."
+    : "문단 안 수동 줄바꿈을 없애 게임 자동 줄바꿈에 맡기고(문단 빈 줄은 유지), 끝의 빈 줄을 제거합니다.";
+  if (!confirm(`${where} 넘치는 대사(8줄 초과)를 정돈합니다.\n${what}\n\n계속할까요?`)) return;
+  const r = await post("/api/overflow_tidy", { scope, rel: STATE.curRel || "", mode });
   if (r.error) return toast(r.error);
   if (r.stats) renderProgress(r.stats);
   if (STATE.curRel) await openFile(STATE.curRel);   // 현재 파일 뷰 갱신(정돈 반영)
@@ -766,6 +839,7 @@ async function runOverflow() {
 function renderDupChoices(list) {
   const box = $("#dupResults");
   box.innerHTML = "";
+  box.classList.toggle("is-empty", !list.length);   // 결과 없으면 섹션을 접어 공간 양보
   const head = document.createElement("div");
   head.className = "search-count";
   head.textContent = list.length
@@ -789,6 +863,7 @@ function renderDupChoices(list) {
 function renderOverflowResults(list) {
   const box = $("#overflowResults");
   box.innerHTML = "";
+  box.classList.toggle("is-empty", !list.length);   // 결과 없으면 섹션을 접어 공간 양보
   const head = document.createElement("div");
   head.className = "search-count";
   head.textContent = list.length
@@ -1042,7 +1117,8 @@ $("#search").addEventListener("click", (e) => { if (e.target.id === "search") cl
 $("#btnOverflow").onclick = showOverflow;
 $("#overflowClose").onclick = closeOverflow;
 $("#overflowGo").onclick = runOverflow;
-$("#overflowTidy").onclick = bulkTidyOverflow;
+$("#overflowTidy").onclick = () => bulkTidyOverflow("full");
+$("#overflowTidySimple").onclick = () => bulkTidyOverflow("simple");
 $("#overflowScope").onchange = runOverflow;
 $("#overflow").addEventListener("click", (e) => { if (e.target.id === "overflow") closeOverflow(); });
 $("#btnFlow").onclick = showFlow;
