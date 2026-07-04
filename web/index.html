@@ -20,7 +20,7 @@
   <div class="toprow actionsrow">
     <div class="actions">
       <button id="btnSearch" title="원문/번역으로 검색">🔍 검색</button>
-      <button id="btnOverflow" title="선택지 중복번역 + 메시지창 넘침(8줄 초과) 찾기">⚠ 경고</button>
+      <button id="btnOverflow" title="선택지 중복번역 + 메시지창 넘침(7줄 초과) 찾기">⚠ 경고</button>
       <button id="btnFlow">🔀 흐름</button>
       <button id="btnTerms">📖 용어집</button>
     </div>
@@ -191,7 +191,7 @@
 <div id="overflow" class="modal" style="display:none">
   <div class="modal-box search-box">
     <div class="modal-head">
-      <span>경고 목록 — ①넘침(8줄 초과로 잘림) ②선택지 중복번역(같은 메뉴에 같은 한국어) (클릭 → 그 문장으로 이동)</span>
+      <span>경고 목록 — ①넘침(7줄 초과로 잘림) ②선택지 중복번역(같은 메뉴에 같은 한국어) (클릭 → 그 문장으로 이동)</span>
       <button id="overflowClose" class="x">✕</button>
     </div>
     <div class="search-bar">
@@ -201,13 +201,13 @@
       </select>
       <button id="overflowGo" class="primary">다시 스캔</button>
       <button id="overflowTidySimple" title="줄바꿈은 건드리지 않고, 넘치는 대사 끝의 빈 줄만 제거합니다">⤵ 간단 정돈</button>
-      <button id="overflowTidy" title="넘치는 대사의 문단 안 수동 줄바꿈을 없애 8줄 넘침을 줄입니다.&#10;원문보다 잘게 쪼개진 대사(자동번역이 좁은 원문 줄폭을 따라간 것)도&#10;게임 폭으로 재줄바꿈합니다 — 들여쓰기·줄 간격은 원문 패턴 유지.&#10;문단 사이 빈 줄은 유지, 끝 빈 줄은 제거">⤵ 상세 정돈</button>
+      <button id="overflowTidy" title="넘치는 대사의 문단 안 수동 줄바꿈을 없애 7줄 넘침을 줄입니다.&#10;원문보다 잘게 쪼개진 대사(자동번역이 좁은 원문 줄폭을 따라간 것)도&#10;게임 폭으로 재줄바꿈합니다 — 들여쓰기·줄 간격은 원문 패턴 유지.&#10;문단 사이 빈 줄은 유지, 끝 빈 줄은 제거">⤵ 상세 정돈</button>
     </div>
     <div class="warn-section-title">⚠ 선택지 중복번역 — 서로 다른 원문이 같은 한국어라 선택지 구분이 안 됨</div>
     <div id="dupResults" class="search-results"></div>
     <div class="warn-section-title">🈳 자동번역 복원 실패 — Azure 초안에서 빈 칸으로 남은 문장 (DeepL 초안 또는 수동 번역 대상)</div>
     <div id="mtFailResults" class="search-results"></div>
-    <div class="warn-section-title">↕ 메시지창 넘침 — 번역이 8줄을 넘겨 게임에서 잘리는 대사</div>
+    <div class="warn-section-title">↕ 메시지창 넘침 — 번역이 7줄을 넘겨 게임에서 잘리는 대사</div>
     <div id="overflowResults" class="search-results"></div>
     <div class="warn-section-title">📖 용어 불일치 — 원문에 용어가 있는데 번역문에 그 표기가 없음 (옛 표기 의심)</div>
     <div id="termCheckResults" class="search-results"></div>

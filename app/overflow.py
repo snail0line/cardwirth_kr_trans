@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""번역문이 게임 메시지창(8줄 기준)을 넘겨 잘리는 대사 목록.
+"""번역문이 게임 메시지창(7줄 기준)을 넘겨 잘리는 대사 목록.
 
 미리보기(web/app.js `wrapForGame`)와 같은 strlen 고정 그리드 계산을 서버에서 재현해
 전 파일(또는 현재 파일)을 스캔한다. 번역(ko)이 있는 메시지창 텍스트(대사/나레이션)만
@@ -14,7 +14,7 @@ from . import textcodec
 
 LINE_UNITS = 43       # 일반 메시지 한 줄 폭(strlen)
 LINE_UNITS_IMG = 33   # 화자 그림/PC 카드가 뜨는 메시지 (그림 폭만큼 좁음)
-WRAP_ROWS = 8         # 넘침 판정 기준 줄 수(넘으면 잘림/페이지 넘어감)
+WRAP_ROWS = 7         # 넘침 판정 기준 줄 수 — 메시지창 180px/줄높이 22px 라 8줄째부터 잘림
 
 _CTRL = re.compile(r"&[A-Za-z]")        # 색·제어코드(게임에 안 보임, 폭 0)
 _MSG_CATS = ("dialogue", "narration")   # 메시지창에 뜨는 텍스트만 (선택지·설명·제목 제외)
@@ -194,10 +194,10 @@ def rewrap_narrow(jp: str, ko: str, units: int) -> str:
 
 def tidy_overflow(proj: Dict[str, Any], scope: str = "all", cur_rel: str = "",
                   mode: str = "full") -> Dict[str, Any]:
-    """넘치는(8줄 초과) 번역 대사를 정돈해 저장 대상 proj 를 갱신. 반환: {tidied, still_over}.
+    """넘치는(7줄 초과) 번역 대사를 정돈해 저장 대상 proj 를 갱신. 반환: {tidied, still_over}.
     실제로 줄 수가 준 유닛만 손대고, 정돈해도 여전히 넘치는 수도 함께 돌려준다.
     mode: "full"=문단 안 수동 줄바꿈 제거+끝 빈 줄 제거(상세) / "simple"=끝 빈 줄만(간단).
-    상세 모드는 8줄 초과 외에 "원문보다 잘게 쪼개진 대사"(_needs_rewrap)도 정돈한다."""
+    상세 모드는 7줄 초과 외에 "원문보다 잘게 쪼개진 대사"(_needs_rewrap)도 정돈한다."""
     tidy = tidy_text if mode == "full" else tidy_trailing
     tidied = 0
     still_over = 0
@@ -222,7 +222,7 @@ def tidy_overflow(proj: Dict[str, Any], scope: str = "all", cur_rel: str = "",
                     continue
                 # 후보를 온건한 순서로: ①들여쓰기 병합(원문 구성 복원)
                 # ②게임 폭 재줄바꿈 ③문단 합치기 ④(넘침 한정) 전부 걷어내고 합치기.
-                # 8줄 안에 들어오는 가장 온건한 후보를 채택, 없으면 접힘 최소인 것.
+                # 7줄 안에 들어오는 가장 온건한 후보를 채택, 없으면 접힘 최소인 것.
                 cand = []
                 if lead_merge != ko:
                     cand.append(lead_merge)
@@ -254,7 +254,7 @@ def tidy_overflow(proj: Dict[str, Any], scope: str = "all", cur_rel: str = "",
 
 def find_overflow(proj: Dict[str, Any], scope: str = "all",
                   cur_rel: str = "", cap: int = 500) -> List[dict]:
-    """8줄을 넘겨 잘리는 번역 대사 목록. scope: 'all'|'file'(cur_rel 만).
+    """7줄을 넘겨 잘리는 번역 대사 목록. scope: 'all'|'file'(cur_rel 만).
     반환: [{rel,sid,cat,speaker,rows,over,img,ko}] — 넘침 큰 순."""
     out: List[dict] = []
     for rel, f in proj["files"].items():

@@ -51,7 +51,7 @@ let STATE = { open: false, files: [], curRel: null };
 //   한 줄 한계 = 43 단위(일반) / 33 단위(화자 그림 있을 때). 세로 = 창에 약 7줄.
 const LINE_UNITS = 43;      // 일반 메시지 자동 줄바꿈 한계(strlen)
 const LINE_UNITS_IMG = 33;  // 화자 그림/사진 있는 메시지 (그림 폭만큼 좁음, 32+1)
-const WRAP_ROWS = 8;        // 넘침 판정 기준 줄 수(넘으면 잘림/페이지 넘어감)
+const WRAP_ROWS = 7;        // 넘침 판정 기준 줄 수 — 8줄째부터 잘림(창 180px/줄 22px)
 // 카드 해설창(CastCard/ItemCard/SkillCard) — cardinfo.py + util.txtwrap mode=1.
 // wx 다이얼로그라 메시지창과 별개: 폭 37단위·9줄·13px, 색코드/7줄컷 없음(있는 그대로 표시).
 const CARD_UNITS = 37;
@@ -974,7 +974,7 @@ function freeUnitEl(rel, u, skipAlt) {
   if (isDone(u)) markDoneBtn.style.display = "none";
   bar.appendChild(markDoneBtn);
 
-  // "정돈" — 문단 안 수동 줄바꿈을 없애 8줄 넘침을 완화. 메시지창에서 넘칠 때만 노출.
+  // "정돈" — 문단 안 수동 줄바꿈을 없애 7줄 넘침을 완화. 메시지창에서 넘칠 때만 노출.
   if (isMsg) {
     tidyBtn = document.createElement("button");
     tidyBtn.type = "button";
@@ -1315,7 +1315,7 @@ async function bulkTidyOverflow(mode) {
   const what = mode === "simple"
     ? "줄바꿈은 건드리지 않고 끝의 빈 줄만 제거합니다."
     : "문단 안 수동 줄바꿈을 없애 게임 자동 줄바꿈에 맡기고(문단 빈 줄은 유지), 끝의 빈 줄을 제거합니다.";
-  if (!confirm(`${where} 넘치는 대사(8줄 초과)를 정돈합니다.\n${what}\n\n계속할까요?`)) return;
+  if (!confirm(`${where} 넘치는 대사(7줄 초과)를 정돈합니다.\n${what}\n\n계속할까요?`)) return;
   const r = await post("/api/overflow_tidy", { scope, rel: STATE.curRel || "", mode });
   if (r.error) return toast(r.error);
   if (r.stats) renderProgress(r.stats);
