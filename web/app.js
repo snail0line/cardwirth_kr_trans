@@ -2036,6 +2036,17 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// 파일 사이드바 접기/펼치기 (상태 기억)
+{
+  const sb = $("#sidebar");
+  let col = localStorage.getItem("sidecol") === "1";
+  const applySide = () => sb.classList.toggle("collapsed", col);
+  applySide();
+  const flip = () => { col = !col; localStorage.setItem("sidecol", col ? "1" : "0"); applySide(); };
+  $("#sideToggle").onclick = flip;
+  $("#sideExpand").onclick = flip;
+}
+
 $("#btnResetFile").onclick = () => resetTranslations("file");
 $("#btnResetAll").onclick = () => resetTranslations("all");
 $("#flowClose").onclick = closeFlow;

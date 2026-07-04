@@ -50,7 +50,21 @@ input[type=text] {
 .sidebar { width: 280px; border-right: 1px solid #e5e7eb; background: #fff; display: flex; flex-direction: column; }
 .sidehead { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; font-weight: 700; color: #374151; }
 .sidehead .cnt { color: #9ca3af; font-weight: 400; font-size: 12px; }
-.sidehead-opt { float: right; font-weight: 400; font-size: 12px; color: #6b7280; cursor: pointer; }
+.sidehead-opt { float: right; font-weight: 400; font-size: 12px; color: #6b7280; cursor: pointer; margin-right: 6px; }
+/* 사이드바 접기/펼치기 */
+.side-toggle {
+  float: right; padding: 1px 7px; font-size: 11px; color: #9ca3af;
+  border: 1px solid #e5e7eb; border-radius: 4px; background: #fff;
+}
+.side-toggle:hover { color: #2563eb; border-color: #bfdbfe; }
+.side-expand { display: none; }
+.sidebar.collapsed { width: 26px; min-width: 26px; }
+.sidebar.collapsed .sidehead, .sidebar.collapsed .filelist { display: none; }
+.sidebar.collapsed .side-expand {
+  display: flex; flex: 1; justify-content: center; padding-top: 12px;
+  cursor: pointer; color: #6b7280; font-size: 12px;
+}
+.sidebar.collapsed .side-expand:hover { color: #2563eb; background: #f9fafb; }
 .filelist { overflow-y: auto; flex: 1; }
 .fileitem {
   padding: 9px 14px; border-bottom: 1px solid #f3f4f6; cursor: pointer;
