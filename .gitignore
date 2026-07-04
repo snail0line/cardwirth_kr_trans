@@ -27,3 +27,7 @@ spike/
 ANALYSIS.md
 PLAN.md
 SPIKE_FINDINGS.md
+tools/batch_fix_terms.py
+tools/batch_fix_terms.bat
+tools/batch_overflow.py
+tools/batch_overflow.bat

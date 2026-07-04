@@ -2021,6 +2021,21 @@ $("#globalOn").onchange = async () => {
   toast(r.on ? "공용 용어집 적용 켬" : "공용 용어집 적용 끔 (이 시나리오만)");
   reloadTerms();
 };
+// Ctrl+S = 진행상황 저장 (브라우저 저장 대화상자 대신)
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    if (!STATE.open) return;
+    // 편집 중이던 칸이 있으면 blur 로 먼저 커밋한 뒤 저장
+    const el = document.activeElement;
+    if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT")) el.blur();
+    setTimeout(async () => {
+      const r = await post("/api/save");
+      toast(r.ok ? "저장됨 (Ctrl+S)" : "저장 오류");
+    }, 250);
+  }
+});
+
 $("#btnResetFile").onclick = () => resetTranslations("file");
 $("#btnResetAll").onclick = () => resetTranslations("all");
 $("#flowClose").onclick = closeFlow;
