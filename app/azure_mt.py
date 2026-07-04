@@ -551,13 +551,19 @@ def draft_units(proj, rel: Optional[str] = None, overwrite: bool = False) -> Dic
 
 
 def failed_units(proj, cap: int = 200) -> list:
-    """복원 실패로 빈 칸으로 남은 유닛 목록(번역되면 자동 제외). 경고 패널/점프용."""
+    """복원 실패로 남은 유닛 목록(번역 완성되면 자동 제외). 경고 패널/점프용.
+    빈 칸뿐 아니라 용어 치환 혼합 초안(가나 잔존) 상태로 남은 실패도 잡는다 —
+    ko 가 차 있다고 실패가 조용히 묻히지 않게."""
+    from . import extract
     out = []
     for rel, f in proj["files"].items():
         for u in f["units"]:
-            if u["kind"] != "free" or not u.get("mt_failed") or u.get("ko"):
+            if u["kind"] != "free" or not u.get("mt_failed"):
                 continue
             jp = textcodec.decode_field(u["field"], u["jp"])
+            ko = textcodec.decode_field(u["field"], u.get("ko", ""))
+            if ko and (u.get("force_done") or not extract.is_partial_ko(jp, ko)):
+                continue        # 완성 번역/명시 완료 — 실패 해소로 간주
             out.append({"rel": rel, "sid": u["id"], "cat": u.get("cat"),
                         "jp": jp.replace("\n", " ").strip()[:100]})
             if len(out) >= cap:

@@ -966,9 +966,24 @@ function renderTermList(host, list, kind) {
         : `<span class="term-kindbadge" title="메시지 본문/설명 문장">문장</span>`;
     });
     if (t.is_identifier) jp.innerHTML += `<span class="term-idbadge" title="식별자이기도 함 — 식별자 자체는 원문 유지, 자유 텍스트에서만 치환">식별자</span>`;
-    jp.appendChild(document.createTextNode(t.jp));
+    jp.appendChild(document.createTextNode(t.jp.replace(/\n/g, "⏎")));   // 줄바꿈 시각화
+    const cp = document.createElement("button");
+    cp.className = "term-copy";
+    cp.textContent = "📋";
+    cp.title = "원문 복사";
+    cp.onclick = async () => {
+      try { await navigator.clipboard.writeText(t.jp); toast("원문 복사됨"); }
+      catch (err) { toast("복사 실패 — 브라우저가 클립보드 접근을 막았습니다"); }
+    };
     const inp = document.createElement("input");
     inp.type = "text"; inp.value = t.ko || ""; inp.placeholder = "번역";
+    if (kind === "exact" && t.jp.includes("\n")) {
+      // 한 줄 입력이라 원문의 줄바꿈을 살릴 수 없음 — 본문 번역 + 자동 전파를 권장
+      inp.placeholder = "⚠ 원문에 줄바꿈(⏎) 있음";
+      inp.title = "여기에 적으면 줄바꿈 없이 한 줄로 적용됩니다.\n"
+        + "줄바꿈을 살리려면 📍 위치에서 본문으로 이동해 번역하세요 — "
+        + "저장하면 동일 원문 전체에 줄바꿈째 자동 전파됩니다.";
+    }
     inp.onblur = async () => {
       if (inp.value === (t.ko || "")) return;
       t.ko = inp.value;
@@ -984,7 +999,7 @@ function renderTermList(host, list, kind) {
     occBtn.className = "term-occbtn";
     occBtn.textContent = `📍 ${(t.occurrences || []).length}`;
     occBtn.title = "등장 위치 보기";
-    head.appendChild(jp); head.appendChild(inp); head.appendChild(occBtn);
+    head.appendChild(jp); head.appendChild(cp); head.appendChild(inp); head.appendChild(occBtn);
     if (kind === "manual") {
       const del = document.createElement("button");
       del.className = "term-del"; del.textContent = "✕"; del.title = "삭제";

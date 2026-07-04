@@ -8,23 +8,31 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">CardWirth 한글화<span id="appVer" class="brandver"></span></div>
-  <div class="openbar">
-    <input id="scenDir" type="text" placeholder="시나리오 폴더 또는 .wsn 파일 경로 입력 후 Enter" />
-    <button id="btnOpen" title="시나리오 XML 폴더 선택">📁 폴더</button>
-    <button id="btnOpenWsn" title=".wsn 패키지 파일 선택">📦 .wsn</button>
+  <div class="toprow">
+    <div class="brand">CardWirth 한글화<span id="appVer" class="brandver"></span></div>
+    <div class="openbar">
+      <input id="scenDir" type="text" placeholder="시나리오 폴더 또는 .wsn 파일 경로 입력 후 Enter" />
+      <button id="btnOpen" title="시나리오 XML 폴더 선택">📁 폴더</button>
+      <button id="btnOpenWsn" title=".wsn 패키지 파일 선택">📦 .wsn</button>
+    </div>
+    <div class="progress" id="progress">—</div>
   </div>
-  <div class="progress" id="progress">—</div>
-  <div class="actions">
-    <button id="btnSearch" title="원문/번역으로 검색">🔍 검색</button>
-    <button id="btnOverflow" title="선택지 중복번역 + 메시지창 넘침(8줄 초과) 찾기">⚠ 경고</button>
-    <button id="btnFlow">🔀 흐름</button>
-    <button id="btnTerms">📖 용어집</button>
-    <button id="btnDeepl" title="DeepL/Azure 로 번역 초안 자동 생성">🌐 번역 초안</button>
-    <button id="btnBulkOut" title="모든 일본어 텍스트를 CSV로 내보내기(번역기용)">⬇ CSV</button>
-    <button id="btnBulkIn" title="번역된 CSV를 다시 가져오기">⬆ CSV</button>
-    <button id="btnSave" title="번역 진행상황 저장">💾 저장</button>
-    <button id="btnExport" class="primary" title="번역 적용된 한글 시나리오 산출">📤 한글 시나리오 내보내기</button>
+  <div class="toprow actionsrow">
+    <div class="actions">
+      <button id="btnSearch" title="원문/번역으로 검색">🔍 검색</button>
+      <button id="btnOverflow" title="선택지 중복번역 + 메시지창 넘침(8줄 초과) 찾기">⚠ 경고</button>
+      <button id="btnFlow">🔀 흐름</button>
+      <button id="btnTerms">📖 용어집</button>
+    </div>
+    <div class="actions">
+      <button id="btnDeepl" title="DeepL/Azure 로 번역 초안 자동 생성">🌐 번역 초안</button>
+      <button id="btnBulkOut" title="모든 일본어 텍스트를 CSV로 내보내기(번역기용)">⬇ CSV</button>
+      <button id="btnBulkIn" title="번역된 CSV를 다시 가져오기">⬆ CSV</button>
+    </div>
+    <div class="actions endactions">
+      <button id="btnSave" title="번역 진행상황 저장">💾 저장</button>
+      <button id="btnExport" class="primary" title="번역 적용된 한글 시나리오 산출">📤 한글 시나리오 내보내기</button>
+    </div>
   </div>
 </header>
 
