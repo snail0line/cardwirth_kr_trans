@@ -12,12 +12,15 @@ from . import textcodec
 
 
 def search_units(proj: Dict[str, Any], query: str, scope: str = "both",
-                 cap: int = 300, include_control: bool = False) -> List[dict]:
+                 cap: int = 300, include_control: bool = False,
+                 jp_cond: str = "") -> List[dict]:
     """query 를 자유 텍스트의 jp/ko 에서 부분검색(대소문자 무시).
     scope: 'both'|'jp'|'ko'. include_control: 제어기호/치환자뿐 유닛 포함(%변수% 사용처 점프용).
+    jp_cond 를 주면 원문에 그 문자열이 있는 유닛만 (찾아 바꾸기의 원문 조건과 동일 기준).
     반환: [{rel,sid,cat,speaker,jp,ko,in_jp,in_ko}]."""
     q = (query or "").strip()
-    if not q:
+    jp_cond = (jp_cond or "").strip()
+    if not q and not jp_cond:
         return []
     ql = q.lower()
     want_jp = scope in ("both", "jp")
@@ -28,10 +31,14 @@ def search_units(proj: Dict[str, Any], query: str, scope: str = "both",
             if u["kind"] != "free" or (u.get("control") and not include_control):
                 continue
             jp = textcodec.decode(u["jp"])
+            if jp_cond and jp_cond not in jp:
+                continue
             ko = textcodec.decode(u.get("ko", ""))
-            in_jp = want_jp and ql in jp.lower()
-            in_ko = want_ko and bool(ko) and ql in ko.lower()
-            if not (in_jp or in_ko):
+            # 검색어 없이 원문 조건만 있으면: 그 원문을 포함한 문장 전부
+            # (찾아 바꾸기에서 옛 표기를 눈으로 찾는 용도)
+            in_jp = bool(q) and want_jp and ql in jp.lower()
+            in_ko = bool(q) and want_ko and bool(ko) and ql in ko.lower()
+            if q and not (in_jp or in_ko):
                 continue
             out.append({
                 "rel": rel, "sid": u["id"], "cat": u.get("cat"),

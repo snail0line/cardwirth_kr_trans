@@ -85,6 +85,14 @@ def _picker_code(kind: str) -> str:
         call = ("p=filedialog.askopenfilename(title='번역 CSV 가져오기', parent=r,"
                 " initialdir=os.environ.get('CW_INITDIR',''),"
                 " filetypes=[('CSV','*.csv'),('모든 파일','*.*')])\n")
+    elif kind == "json_save":  # 공용 용어집 내보내기
+        call = ("p=filedialog.asksaveasfilename(title='공용 용어집 내보내기', parent=r,"
+                " defaultextension='.json',"
+                " initialfile=os.environ.get('CW_INITFILE','global_terms.json'),"
+                " filetypes=[('JSON','*.json'),('모든 파일','*.*')])\n")
+    elif kind == "json_open":  # 공용 용어집 가져오기
+        call = ("p=filedialog.askopenfilename(title='공용 용어집 가져오기', parent=r,"
+                " filetypes=[('JSON','*.json'),('모든 파일','*.*')])\n")
     else:                  # 시나리오 XML 폴더 선택
         call = "p=filedialog.askdirectory(title='CardWirth scenario XML folder', parent=r)\n"
     return (
@@ -265,8 +273,10 @@ class Handler(BaseHTTPRequestHandler):
             query = q.get("q", [""])[0]
             scope = q.get("scope", ["both"])[0]
             inc_ctrl = q.get("ctrl", ["0"])[0] == "1"
+            jp_cond = q.get("jpcond", [""])[0]
             return self._json({"results": search.search_units(p, query, scope,
-                                                              include_control=inc_ctrl)})
+                                                              include_control=inc_ctrl,
+                                                              jp_cond=jp_cond)})
         if u.path == "/api/overflow":
             p = STATE["proj"]
             if not p:
@@ -301,6 +311,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"rel": rel,
                                "outline": outline.build_outline(root, resolve, nd,
                                                                 content_rels=content)})
+        if u.path == "/api/global_terms":
+            # 공용 용어집 전체 목록 — 프로젝트가 열려 있으면 등장 횟수·위치 포함
+            p = STATE["proj"]
+            if p:
+                return self._json({"results": terms.global_list(p), "has_proj": True})
+            return self._json({"results": [{"jp": jp, "ko": ko, "count": 0, "occurrences": []}
+                                           for jp, ko in sorted(terms.load_global().items())],
+                               "has_proj": False})
+
+        if u.path == "/api/term_check":
+            # 용어 불일치 검사 — 원문에 용어가 있는데 번역문에 그 표기가 없는 문장
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            return self._json({"results": terms.term_mismatches(p)})
+
         if u.path == "/api/flow":
             p = STATE["proj"]
             if not p:
@@ -389,7 +415,10 @@ class Handler(BaseHTTPRequestHandler):
             p = STATE["proj"]
             if not p:
                 return self._json({"error": "no project"}, 404)
-            return self._json(terms.detect(p))
+            r = terms.detect(p)
+            r["global"] = terms.global_list(p)
+            r["global_on"] = terms.global_enabled(p)
+            return self._json(r)
 
         if u.path == "/api/glossary":
             p = STATE["proj"]
@@ -615,6 +644,65 @@ class Handler(BaseHTTPRequestHandler):
                 tn.pop(name, None)      # 빈 값/원문 그대로 = 표시명 제거(원문으로)
             project.save(p)
             return self._json({"ok": True})
+
+        if u.path == "/api/global_term":
+            # 공용 용어(모든 시나리오 공통) 추가/수정/삭제(ko 빈값). 프로젝트와 무관하게 저장.
+            jp = (data.get("jp") or "").strip()
+            if not jp:
+                return self._json({"error": "단어를 입력하세요"}, 400)
+            terms.set_global(jp, data.get("ko") or "")
+            return self._json({"ok": True})
+
+        if u.path == "/api/reapply_terms":
+            # 유효 용어(공용+프로젝트)를 번역칸 잔존 원문에 일괄 치환. dry=개수만.
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            if data.get("dry"):
+                return self._json({"ok": True, "would": terms.reapply_terms_to_existing(p, dry=True)})
+            n = terms.reapply_terms_to_existing(p)
+            project.save(p)
+            return self._json({"ok": True, "applied": n, "stats": _stats()})
+
+        if u.path == "/api/global_export":
+            # 공용 용어집 → JSON 파일 (공유용). 저장 위치는 네이티브 대화상자로.
+            pick = _pick_folder_dialog("json_save", initfile="global_terms.json")
+            if pick.get("error"):
+                return self._json({"error": pick["error"]}, 500)
+            if not pick.get("path"):
+                return self._json({"ok": True, "path": ""})     # 취소
+            try:
+                n = terms.export_global(pick["path"])
+            except OSError as e:
+                return self._json({"error": str(e)}, 500)
+            return self._json({"ok": True, "path": pick["path"], "count": n})
+
+        if u.path == "/api/global_import":
+            # 1단계(path 없음): 파일 선택 + 검사만 → {path, total, new, conflict}
+            # 2단계(path + apply): 병합 적용 → {added, updated}
+            path = (data.get("path") or "").strip()
+            try:
+                if not path:
+                    pick = _pick_folder_dialog("json_open")
+                    if pick.get("error"):
+                        return self._json({"error": pick["error"]}, 500)
+                    if not pick.get("path"):
+                        return self._json({"ok": True, "path": ""})   # 취소
+                    info = terms.inspect_import(pick["path"])
+                    return self._json({"ok": True, "path": pick["path"], **info})
+                if data.get("apply"):
+                    r2 = terms.import_global(path, overwrite=bool(data.get("overwrite")))
+                    return self._json({"ok": True, **r2})
+            except (OSError, ValueError) as e:
+                return self._json({"error": f"가져오기 실패: {e}"}, 400)
+            return self._json({"error": "bad request"}, 400)
+
+        if u.path == "/api/global_toggle":
+            # 이 시나리오에서 공용 용어집 사용 여부 (프로젝트에 저장)
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            p["use_global_terms"] = bool(data.get("on"))
+            project.save(p)
+            return self._json({"ok": True, "on": p["use_global_terms"]})
 
         if u.path == "/api/apply_terms":
             if not p:

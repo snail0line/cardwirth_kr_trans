@@ -34,8 +34,10 @@ class NameDisplay:
              ④원문."""
 
     def __init__(self, proj):
+        from . import terms as terms_mod
         self.tool = (proj or {}).get("tool_names", {}) or {}
-        self.terms = {k.strip(): v for k, v in ((proj or {}).get("terms") or {}).items() if v}
+        self.terms = {k.strip(): v for k, v in
+                      (terms_mod.effective_terms(proj) if proj else {}).items()}
         self.gl = {}      # (etype, jp) -> ko
         self.scene = {}   # rel -> 번역된 씬(Area/Package/Battle) 이름
         if not proj:

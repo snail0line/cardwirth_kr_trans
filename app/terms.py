@@ -10,11 +10,112 @@
 적용 대상은 자유 텍스트(free)만. 플래그/쿠폰 등 식별자엔 적용하지 않는다.
 """
 from __future__ import annotations
+import json
+import os
 import re
 from collections import Counter
 from typing import Dict, Any, List
 
 from . import schema, textcodec
+
+# ── 공용 용어집 (모든 시나리오 공통 — リューン=륜 같은 세계관 단어) ──────────
+# projects/ 아래 로컬 저장(배포 안 됨). 프로젝트별 use_global_terms 로 on/off.
+_GLOBAL_PATH = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "projects", "global_terms.json"))
+
+
+def load_global() -> Dict[str, str]:
+    try:
+        with open(_GLOBAL_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        return {k: v for k, v in d.items() if k and v}
+    except (OSError, ValueError):
+        return {}
+
+
+def set_global(jp: str, ko: str) -> Dict[str, str]:
+    """공용 용어 추가/수정. ko 빈값 = 삭제. 갱신된 전체 맵 반환."""
+    jp = (jp or "").strip()
+    ko = (ko or "").strip()
+    d = load_global()
+    if jp:
+        if ko:
+            d[jp] = ko
+        else:
+            d.pop(jp, None)
+    os.makedirs(os.path.dirname(_GLOBAL_PATH), exist_ok=True)
+    with open(_GLOBAL_PATH, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    return d
+
+
+def _write_global(d: Dict[str, str]) -> None:
+    os.makedirs(os.path.dirname(_GLOBAL_PATH), exist_ok=True)
+    with open(_GLOBAL_PATH, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+
+
+def export_global(path: str) -> int:
+    """공용 용어집을 JSON 파일로 저장(공유용). 반환: 용어 수."""
+    d = load_global()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    return len(d)
+
+
+def inspect_import(path: str) -> Dict[str, int]:
+    """가져올 파일 검사(적용 안 함). {total, new, conflict, same}."""
+    with open(path, encoding="utf-8-sig") as f:
+        d = json.load(f)
+    if not isinstance(d, dict):
+        raise ValueError("JSON 형식이 다릅니다 — {\"단어\": \"번역\"} 맵이어야 합니다")
+    d = {str(k).strip(): str(v).strip() for k, v in d.items()
+         if str(k).strip() and str(v).strip()}
+    cur = load_global()
+    new = sum(1 for k in d if k not in cur)
+    conflict = sum(1 for k, v in d.items() if k in cur and cur[k] != v)
+    same = len(d) - new - conflict
+    return {"total": len(d), "new": new, "conflict": conflict, "same": same}
+
+
+def import_global(path: str, overwrite: bool = False) -> Dict[str, int]:
+    """가져온 파일을 내 공용 용어집에 병합. overwrite=False 면 새 단어만 추가.
+    반환: {added, updated}."""
+    with open(path, encoding="utf-8-sig") as f:
+        d = json.load(f)
+    d = {str(k).strip(): str(v).strip() for k, v in d.items()
+         if str(k).strip() and str(v).strip()}
+    cur = load_global()
+    added = updated = 0
+    for k, v in d.items():
+        if k not in cur:
+            cur[k] = v
+            added += 1
+        elif overwrite and cur[k] != v:
+            cur[k] = v
+            updated += 1
+    _write_global(cur)
+    return {"added": added, "updated": updated}
+
+
+def global_enabled(proj: Dict[str, Any]) -> bool:
+    return bool(proj.get("use_global_terms", True))
+
+
+def effective_terms(proj: Dict[str, Any]) -> Dict[str, str]:
+    """초안 생성 등에 실제 적용할 용어 = 공용(켜져 있으면) + 프로젝트(우선)."""
+    out = dict(load_global()) if global_enabled(proj) else {}
+    out.update({k: v for k, v in (proj.get("terms") or {}).items() if (v or "").strip()})
+    return out
+
+
+def global_list(proj: Dict[str, Any]) -> List[dict]:
+    """공용 용어 목록 + 현재 시나리오 등장 횟수·위치. [{jp, ko, count, occurrences}]"""
+    joined = "\n".join(_free_values(proj))
+    index = _free_index(proj)
+    return [{"jp": jp, "ko": ko, "count": joined.count(jp),
+             "occurrences": _occurrences(index, jp, exact=False)}
+            for jp, ko in sorted(load_global().items())]
 
 
 # 화자 후보에서 제외할 합성 라벨(실제 캐릭터 이름이 아님)
@@ -180,10 +281,12 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
     free_vals = _free_values(proj)
     index = _free_index(proj)
     ids = _identifier_names(proj)
+    gl = load_global() if global_enabled(proj) else {}
 
     def entry(jp, count, exact):
         return {
             "jp": jp, "count": count, "ko": saved.get(jp, ""),
+            "global_ko": gl.get(jp.strip(), ""),   # 공용 용어 번역(프로젝트 미입력 시 적용됨)
             "is_identifier": _clean_term(jp) in ids,
             "occurrences": _occurrences(index, jp, exact=exact),
         }
@@ -219,6 +322,10 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
                     and not _is_system_name(sp) \
                     and not any(c in sp for c in " 　\t"):
                 cand.add(sp)     # 공백 포함 = 이름이 아니라 문장(화자 오탐 방어)
+    # 공용 용어 중 이 시나리오 본문에 실제 등장하는 것도 후보로 (적용 상태 확인용)
+    for t in gl:
+        if len(t) >= 2:
+            cand.add(t)
     # 본문 속 「」『』 인용어 — 식별자/화자 어디에도 없는 고유명사를 채굴
     mined = set()
     for t in _mine_quoted_terms(free_vals):
@@ -338,10 +445,86 @@ def apply_word_to_existing(proj: Dict[str, Any], jp: str, ko: str) -> int:
     return n
 
 
+def reapply_terms_to_existing(proj: Dict[str, Any], dry: bool = False) -> int:
+    """모든 유효 용어(공용+프로젝트)를 "번역칸에 남아 있는 원문 단어"에 일괄 치환.
+
+    공용 용어집 도입 전에 만든 혼합 초안/부분 번역의 잔존 원문 소급 적용용.
+    완성 한국어 번역에는 원문 단어가 없으므로 자연히 안 건드리고,
+    명시 완료(force_done)·읽기전용(control)은 보호. dry=True 면 대상 수만 센다."""
+    items = sorted(effective_terms(proj).items(), key=lambda kv: -len(kv[0]))
+    if not items:
+        return 0
+    n = 0
+    for f in proj["files"].values():
+        for u in f["units"]:
+            if u["kind"] != "free" or u.get("control") or u.get("force_done"):
+                continue
+            cur = textcodec.decode_field(u["field"], u.get("ko", ""))
+            if not cur:
+                continue
+            masked, holds = _protect_vars(cur)   # $..$ / %..% 보호
+            new = masked
+            for tj, tk in items:
+                if tj in new:
+                    new = new.replace(tj, tk)
+            new = _restore_vars(new, holds)
+            if new != cur:
+                n += 1
+                if not dry:
+                    u["ko"] = textcodec.encode_field(u["field"], new)
+    return n
+
+
+def term_mismatches(proj: Dict[str, Any], cap: int = 300) -> List[dict]:
+    """용어 불일치 검사: 원문에 용어가 있는데 번역문에 그 한국어 표기가 없는
+    완성 번역 목록 — 공용 용어집 도입 전의 "옛 표기" 발견용.
+
+    원문 단어가 번역문에 그대로 남은 것(부분 번역)은 재적용 대상이므로 제외.
+    반환: [{rel, sid, term, term_ko, jp, ko}] (문장·용어당 1행)."""
+    terms = effective_terms(proj)
+    if not terms:
+        return []
+    out: List[dict] = []
+    for rel, f in proj["files"].items():
+        for u in f["units"]:
+            if u["kind"] != "free" or u.get("control"):
+                continue
+            ko = textcodec.decode_field(u["field"], u.get("ko", ""))
+            if not ko.strip():
+                continue
+            jp = textcodec.decode_field(u["field"], u["jp"])
+            flat_jp = jp.replace("\n", " ").strip()
+            flat_ko = ko.replace("\n", " ").strip()
+            # 긴 용어부터 검사하고 매칭된 자리는 마스킹 — 依頼人 이 걸린 자리에서
+            # 부분 문자열 依頼 가 또 걸리는 중복 방지 (긴 용어만 보고)
+            work = jp
+            for tj, tk in sorted(terms.items(), key=lambda kv: -len(kv[0])):
+                if tj not in work:
+                    continue
+                hit = tk not in ko and tj not in ko
+                work = work.replace(tj, "\x00" * len(tj))
+                if hit:
+                    # 발췌는 용어 등장 위치를 중심으로 (앞부분만 자르면 용어가 안 보임)
+                    i = flat_jp.find(tj)
+                    s = max(0, i - 18)
+                    ex = flat_jp[s:s + 70]
+                    if s > 0:
+                        ex = "…" + ex
+                    if s + 70 < len(flat_jp):
+                        ex += "…"
+                    out.append({
+                        "rel": rel, "sid": u["id"], "term": tj, "term_ko": tk,
+                        "jp": ex, "ko": flat_ko[:70],
+                    })
+                    if len(out) >= cap:
+                        return out
+    return out
+
+
 def apply_words_to_drafts(proj: Dict[str, Any], only_untranslated: bool = True) -> int:
     """word 용어들을 자유 텍스트에 substring 치환해 초안(ko) 생성. 변경 건수 반환.
-    이미 번역된 유닛은 기본적으로 건드리지 않는다."""
-    terms = {k: v for k, v in proj.get("terms", {}).items() if v}
+    이미 번역된 유닛은 기본적으로 건드리지 않는다. 공용 용어집(켜져 있으면) 포함."""
+    terms = effective_terms(proj)
     # 긴 용어 먼저 치환(부분겹침 방지)
     items = sorted(terms.items(), key=lambda kv: -len(kv[0]))
     n = 0

@@ -412,8 +412,9 @@ def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
     if not targets:
         return {"translated": 0, "chars": 0, "unique": 0}
     uniq_jp = list(dict.fromkeys(jp for _, jp in targets))
-    # 용어집(번역이 입력된 단어)을 초안에 강제 적용 — リューン→륜 같은 고정 표기
-    terms = {jp: ko for jp, ko in (proj.get("terms") or {}).items() if (ko or "").strip()}
+    # 용어집(공용+프로젝트)을 초안에 강제 적용 — リューン→륜 같은 고정 표기
+    from . import terms as terms_mod
+    terms = terms_mod.effective_terms(proj)
     trans = translate_texts(uniq_jp, force=force, glossary=terms or None, progress=progress)
     n = 0
     for u, jp in targets:

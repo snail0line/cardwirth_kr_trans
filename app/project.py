@@ -87,6 +87,9 @@ def merge(old: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str, Any]:
     # 툴 전용 표시 이름(흐름 패널/흐름 보기 라벨 번역 — export 에 안 들어감) 보존
     if old.get("tool_names"):
         fresh["tool_names"] = dict(old["tool_names"])
+    # 공용 용어집 사용 여부 보존
+    if "use_global_terms" in old:
+        fresh["use_global_terms"] = old["use_global_terms"]
     # 글로서리: 같은 gkey 의 ko 보존
     for k, g in fresh["glossary"].items():
         if k in old.get("glossary", {}) and old["glossary"][k].get("ko"):

@@ -787,6 +787,22 @@ function freeUnitEl(rel, u, skipAlt) {
     ta.disabled = true;                 // 제어기호/치환자뿐 — 번역할 내용 없음(읽기전용)
     ta.title = "제어코드·치환자뿐인 텍스트라 번역하지 않습니다";
   }
+  // 입력창은 내용 전체가 보이는 높이로 자동 고정 (드래그 리사이즈 불필요).
+  // 기본 크기는 줄 수(rows) — 접힌 그룹 등 숨김 상태에서도 정확하다.
+  // 화면에 보일 때는 scrollHeight 로 보정(자동 줄바꿈으로 넘치는 경우 커버).
+  const fitRows = () => {
+    ta.rows = Math.max(3, (ta.value.match(/\n/g) || []).length + 2);
+  };
+  const autoGrow = () => {
+    fitRows();
+    if (!ta.clientHeight) return;       // 숨김 상태 — rows 크기가 그대로 쓰임
+    ta.style.height = "auto";
+    ta.style.height = (ta.scrollHeight + 2) + "px";
+  };
+  fitRows();
+  ta.addEventListener("input", autoGrow);
+  ta.addEventListener("focus", autoGrow);   // 접힘 해제 후 첫 포커스에서 보정
+  requestAnimationFrame(autoGrow);
 
   // ko 변경을 서버에 반영 (onblur·되돌리기 공용)
   let markDoneBtn = null;   // [완료로 표시] — 완료 상태에 따라 표시/숨김
@@ -992,11 +1008,107 @@ async function showTerms() {
   $("#terms").style.display = "flex";
   await reloadTerms();
 }
+// 공용 용어 변경 후 열려 있는 화면들 갱신 (용어집 모달 + 공용 용어집 패널)
+function refreshGlobalViews() {
+  if (STATE.open && $("#terms").style.display !== "none") reloadTerms();
+  if ($("#gterms").style.display !== "none") loadGTerms();
+}
+
 async function reloadTerms() {
+  if (!STATE.open) return;
   const r = await api("/api/terms");
+  $("#globalOn").checked = !!r.global_on;
+  renderGlobalList($("#termsGlobal"), r.global || []);
   renderTermList($("#termsManual"), r.manual || [], "manual");
   renderTermList($("#termsExact"), r.exact || [], "exact");
   renderTermList($("#termsWord"), r.word || [], "word");
+}
+
+// 용어 등장 위치(📍) 버튼 + 펼침 목록 — 일반/공용 용어 공용
+function occurrenceParts(occurrences) {
+  const btn = document.createElement("button");
+  btn.className = "term-occbtn";
+  btn.textContent = `📍 ${(occurrences || []).length}`;
+  btn.title = "등장 위치 보기";
+  const box = document.createElement("div");
+  box.className = "term-occ";
+  box.style.display = "none";
+  (occurrences || []).forEach((o) => {
+    const orow = document.createElement("div");
+    orow.className = "occ-row";
+    orow.innerHTML = `<span class="occ-file"></span><span class="occ-prev"></span>`;
+    orow.querySelector(".occ-file").textContent = o.rel.split(/[\\/]/).pop();
+    orow.querySelector(".occ-prev").textContent = o.preview;
+    orow.title = o.ko ? "번역: " + o.ko : "(미번역)";
+    orow.onclick = () => {
+      closeTerms();
+      $("#gterms").style.display = "none";
+      jumpTo(o.rel, o.sid);
+    };
+    box.appendChild(orow);
+  });
+  btn.onclick = () => {
+    box.style.display = box.style.display === "none" ? "block" : "none";
+  };
+  return { btn, box };
+}
+
+// 공용 용어(모든 시나리오 공통) 목록 — 번역 비우면 삭제.
+// 이 시나리오에 안 나오는(0회) 용어는 기본 숨김 — 토글로 펼쳐서 관리.
+function renderGlobalList(host, list) {
+  host.innerHTML = "";
+  if (!list.length) {
+    host.innerHTML = `<div class="empty">없음 — 용어 줄의 🌐 버튼으로 자주 쓰는 단어를 등록하세요</div>`;
+    return;
+  }
+  const used = list.filter((t) => t.count > 0);
+  const unused = list.filter((t) => !t.count);
+  const render = (t) => renderGlobalRow(host, t);
+  used.forEach(render);
+  if (!used.length) {
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = "이 시나리오에 등장하는 공용 용어가 없습니다";
+    host.appendChild(d);
+  }
+  if (unused.length) {
+    const tog = document.createElement("div");
+    tog.className = "gt-unused-toggle";
+    tog.textContent = `이 시나리오 미등장 ${unused.length}개 — 전체 관리에서 보기 ↗`;
+    tog.onclick = showGTerms;
+    host.appendChild(tog);
+  }
+}
+
+function renderGlobalRow(host, t) {
+    const row = document.createElement("div");
+    row.className = "term-row done";
+    const head = document.createElement("div");
+    head.className = "term-head";
+    const jp = document.createElement("span");
+    jp.className = "term-jp";
+    jp.innerHTML = `<span class="term-cnt" title="이 시나리오 등장 횟수">${t.count}</span>`;
+    jp.appendChild(document.createTextNode(t.jp));
+    const inp = document.createElement("input");
+    inp.type = "text"; inp.value = t.ko || ""; inp.placeholder = "번역 (비우면 삭제)";
+    inp.onblur = async () => {
+      if (inp.value === (t.ko || "")) return;
+      await post("/api/global_term", { jp: t.jp, ko: inp.value.trim() });
+      toast(inp.value.trim() ? "공용 용어 수정됨" : "공용 용어 삭제됨");
+      refreshGlobalViews();
+    };
+    const del = document.createElement("button");
+    del.className = "term-del"; del.textContent = "✕"; del.title = "공용 용어에서 삭제";
+    del.onclick = async () => {
+      await post("/api/global_term", { jp: t.jp, ko: "" });
+      refreshGlobalViews();
+    };
+    const occ = occurrenceParts(t.occurrences);
+    head.appendChild(jp); head.appendChild(inp); head.appendChild(occ.btn); head.appendChild(del);
+    row.appendChild(head);
+    row.appendChild(occ.box);
+    host.appendChild(row);
+    return row;
 }
 function closeTerms() { $("#terms").style.display = "none"; }
 
@@ -1030,6 +1142,11 @@ function renderTermList(host, list, kind) {
     };
     const inp = document.createElement("input");
     inp.type = "text"; inp.value = t.ko || ""; inp.placeholder = "번역";
+    if (t.global_ko && !t.ko) {
+      // 프로젝트 번역이 없으면 공용 용어 번역이 적용됨을 표시
+      inp.placeholder = "공용: " + t.global_ko;
+      inp.title = `공용 용어집의 "${t.global_ko}" 가 적용됩니다.\n여기 입력하면 이 시나리오에서는 그 번역이 우선합니다.`;
+    }
     if (kind === "exact" && t.jp.includes("\n")) {
       // 한 줄 입력이라 원문의 줄바꿈을 살릴 수 없음 — 본문 번역 + 자동 전파를 권장
       inp.placeholder = "⚠ 원문에 줄바꿈(⏎) 있음";
@@ -1048,11 +1165,22 @@ function renderTermList(host, list, kind) {
       if (res.stats) renderProgress(res.stats);
       if (STATE.curRel) openFile(STATE.curRel);
     };
-    const occBtn = document.createElement("button");
-    occBtn.className = "term-occbtn";
-    occBtn.textContent = `📍 ${(t.occurrences || []).length}`;
-    occBtn.title = "등장 위치 보기";
-    head.appendChild(jp); head.appendChild(cp); head.appendChild(inp); head.appendChild(occBtn);
+    const occ = occurrenceParts(t.occurrences);
+    const occBtn = occ.btn;
+    // 🌐 공용 용어집 등록 — 자주 나오는 단어를 모든 시나리오 공통으로
+    const gbtn = document.createElement("button");
+    gbtn.className = "term-copy";
+    gbtn.textContent = "🌐";
+    gbtn.title = "이 단어를 공용 용어집에 등록합니다 (모든 시나리오 공통 적용).\n번역칸에 값이 있어야 합니다.";
+    gbtn.onclick = async () => {
+      const ko = inp.value.trim() || t.ko || "";
+      if (!ko) return toast("먼저 번역을 입력하세요");
+      await post("/api/global_term", { jp: t.jp, ko });
+      toast(`공용 용어집에 등록: ${t.jp} → ${ko}`);
+      reloadTerms();
+    };
+    head.appendChild(jp); head.appendChild(cp); head.appendChild(gbtn);
+    head.appendChild(inp); head.appendChild(occBtn);
     if (kind === "manual") {
       const del = document.createElement("button");
       del.className = "term-del"; del.textContent = "✕"; del.title = "삭제";
@@ -1060,24 +1188,7 @@ function renderTermList(host, list, kind) {
       head.appendChild(del);
     }
     row.appendChild(head);
-    // 펼침: 등장 위치(파일·문장) 목록 → 클릭 이동
-    const occBox = document.createElement("div");
-    occBox.className = "term-occ"; occBox.style.display = "none";
-    (t.occurrences || []).forEach((o) => {
-      const orow = document.createElement("div");
-      orow.className = "occ-row";
-      orow.innerHTML = `<span class="occ-file"></span><span class="occ-prev"></span>`;
-      orow.querySelector(".occ-file").textContent = o.rel.split(/[\\/]/).pop();
-      orow.querySelector(".occ-prev").textContent = o.preview;
-      orow.title = o.ko ? "번역: " + o.ko : "(미번역)";   // 그 문장의 현재 번역문
-      orow.onclick = () => { closeTerms(); jumpTo(o.rel, o.sid); };
-      occBox.appendChild(orow);
-    });
-    occBtn.onclick = () => {
-      const open = occBox.style.display === "none";
-      occBox.style.display = open ? "block" : "none";
-    };
-    row.appendChild(occBox);
+    row.appendChild(occ.box);   // 펼침: 등장 위치(파일·문장) 목록 → 클릭 이동
     host.appendChild(row);
   });
 }
@@ -1158,10 +1269,12 @@ function closeSearch() { $("#search").style.display = "none"; }
 async function runSearch() {
   const q = $("#searchQ").value.trim();
   const scope = $("#searchScope").value;
+  const jpcond = $("#replaceJpCond").value.trim();   // 원문 조건 — 검색 결과에도 적용
   const box = $("#searchResults");
-  if (!q) { box.innerHTML = `<div class="empty">검색어를 입력하세요</div>`; return; }
+  if (!q && !jpcond) { box.innerHTML = `<div class="empty">검색어 또는 원문 조건을 입력하세요</div>`; return; }
   box.innerHTML = `<div class="empty">검색 중…</div>`;
-  const r = await api(`/api/search?q=${encodeURIComponent(q)}&scope=${encodeURIComponent(scope)}`);
+  const r = await api(`/api/search?q=${encodeURIComponent(q)}&scope=${encodeURIComponent(scope)}`
+    + `&jpcond=${encodeURIComponent(jpcond)}`);
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   renderSearchResults(r.results || [], q);
 }
@@ -1231,6 +1344,80 @@ async function runOverflow() {
   const r = await api(`/api/overflow?scope=${encodeURIComponent(scope)}${rel}`);
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   renderOverflowResults(r.results || []);
+  const tc = await api("/api/term_check");
+  renderTermCheck(tc.results || []);
+}
+
+// 용어 불일치 — 원문에 용어가 있는데 번역문에 그 표기가 없는 문장 (옛 표기 의심).
+// 용어별로 묶어 건수를 보여주고, 그룹을 펼치면 문장 목록 + 찾아 바꾸기로 바로 이동.
+function renderTermCheck(list) {
+  const box = $("#termCheckResults");
+  if (!box) return;
+  box.innerHTML = "";
+  box.classList.toggle("is-empty", !list.length);
+  const head = document.createElement("div");
+  head.className = "search-count";
+  head.textContent = list.length
+    ? `${list.length}건${list.length >= 300 ? "+ (상한)" : ""} — 용어를 펼쳐 옛 표기를 확인하고 [🔍 찾아 바꾸기]로 교정하세요`
+    : "용어 불일치가 없습니다 👍";
+  box.appendChild(head);
+  // 용어별 그룹핑 (건수 많은 순)
+  const groups = new Map();
+  list.forEach((m) => {
+    if (!groups.has(m.term)) groups.set(m.term, { term_ko: m.term_ko, rows: [] });
+    groups.get(m.term).rows.push(m);
+  });
+  [...groups.entries()].sort((a, b) => b[1].rows.length - a[1].rows.length)
+    .forEach(([term, g]) => {
+      const gh = document.createElement("div");
+      gh.className = "tc-group";
+      const caret = document.createElement("span");
+      caret.className = "sec-caret";
+      caret.textContent = "▸";
+      const lab = document.createElement("span");
+      lab.className = "tc-label";
+      lab.textContent = `${term} → ${g.term_ko} 없음`;
+      const cnt = document.createElement("span");
+      cnt.className = "term-cnt";
+      cnt.textContent = `${g.rows.length}건`;
+      const fix = document.createElement("button");
+      fix.className = "tc-fix";
+      fix.textContent = "🔍 찾아 바꾸기";
+      fix.title = `검색 모달을 열고 원문 조건 "${term}" · 바꿀 말 "${g.term_ko}" 를 미리 채웁니다.\n검색어에 옛 표기를 입력해 확인 후 바꾸세요.`;
+      fix.onclick = (e) => {
+        e.stopPropagation();
+        closeOverflow();
+        showSearch();
+        $("#searchScope").value = "ko";
+        $("#searchQ").value = "";
+        $("#replaceJpCond").value = term;
+        $("#replaceKo").value = g.term_ko;
+        $("#searchQ").focus();
+        runSearch();   // 원문 조건만으로 바로 검색 — 해당 문장 전부 표시
+        toast(`원문에 ${term} 가 있는 문장을 표시했어요 — 옛 표기가 보이면 검색어에 입력해 좁히세요`);
+      };
+      gh.appendChild(caret); gh.appendChild(lab); gh.appendChild(cnt); gh.appendChild(fix);
+      const body = document.createElement("div");
+      body.style.display = "none";
+      g.rows.forEach((m) => {
+        const row = document.createElement("div");
+        row.className = "sr-row";
+        row.innerHTML = `<div class="sr-top"><span class="sr-file"></span></div>
+          <div class="sr-jp"></div><div class="sr-ko"></div>`;
+        row.querySelector(".sr-file").textContent = m.rel;
+        row.querySelector(".sr-jp").innerHTML = hl(m.jp, m.term);   // 걸린 용어 하이라이트
+        row.querySelector(".sr-ko").textContent = m.ko;
+        row.onclick = () => { closeOverflow(); jumpTo(m.rel, m.sid); };
+        body.appendChild(row);
+      });
+      gh.onclick = () => {
+        const open = body.style.display === "none";
+        body.style.display = open ? "" : "none";
+        caret.textContent = open ? "▾" : "▸";
+      };
+      box.appendChild(gh);
+      box.appendChild(body);
+    });
 }
 function renderMtFailed(list) {
   const box = $("#mtFailResults");
@@ -1670,6 +1857,135 @@ $("#termAdd").onclick = addTerm;
 $("#termAddKo").addEventListener("keydown", (e) => { if (e.key === "Enter") addTerm(); });
 $("#termAddJp").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#termAddKo").focus(); });
 $("#terms").addEventListener("click", (e) => { if (e.target.id === "terms") closeTerms(); });
+// 용어집 섹션 접기/펼치기 — 헤더 클릭 (헤더 안 버튼/체크박스는 제외), 상태 기억
+document.querySelectorAll(".terms-sec").forEach((sec) => {
+  const h = sec.querySelector("h3");
+  const list = sec.querySelector(".terms-list");
+  if (!h || !list) return;
+  const key = "termsec:" + list.id;
+  const caret = document.createElement("span");
+  caret.className = "sec-caret";
+  h.prepend(caret);
+  let open = localStorage.getItem(key) !== "0";
+  const apply = () => {
+    sec.classList.toggle("collapsed", !open);
+    caret.textContent = open ? "▾" : "▸";
+  };
+  apply();
+  h.style.cursor = "pointer";
+  h.addEventListener("click", (e) => {
+    if (e.target.closest("button, input, label")) return;
+    open = !open;
+    localStorage.setItem(key, open ? "1" : "0");
+    apply();
+  });
+});
+
+// 경고 패널 섹션 접기/펼치기 — 제목 클릭, 상태 기억
+document.querySelectorAll("#overflow .warn-section-title").forEach((h) => {
+  const body = h.nextElementSibling;              // 대응하는 .search-results
+  if (!body) return;
+  const key = "warnsec:" + body.id;
+  const caret = document.createElement("span");
+  caret.className = "sec-caret";
+  h.prepend(caret);
+  let open = localStorage.getItem(key) !== "0";
+  const apply = () => {
+    body.style.display = open ? "" : "none";
+    caret.textContent = open ? "▾" : "▸";
+  };
+  apply();
+  h.style.cursor = "pointer";
+  h.addEventListener("click", () => {
+    open = !open;
+    localStorage.setItem(key, open ? "1" : "0");
+    apply();
+  });
+});
+
+// ── 공용 용어집 패널 (전체 관리) ──
+let GT_CACHE = [];
+async function loadGTerms() {
+  const r = await api("/api/global_terms");
+  GT_CACHE = r.results || [];
+  renderGTList();
+}
+function renderGTList() {
+  const host = $("#gtList");
+  host.innerHTML = "";
+  const q = $("#gtFilter").value.trim().toLowerCase();
+  const list = GT_CACHE.filter((t) =>
+    !q || t.jp.toLowerCase().includes(q) || (t.ko || "").toLowerCase().includes(q));
+  $("#gtCount").textContent = q
+    ? `${list.length}개 표시 / 전체 ${GT_CACHE.length}개`
+    : `전체 ${GT_CACHE.length}개 · 등장 횟수(왼쪽 숫자)는 현재 열린 시나리오 기준`;
+  if (!list.length) {
+    host.innerHTML = `<div class="empty">${q ? "필터에 맞는 용어가 없습니다" : "등록된 공용 용어가 없습니다"}</div>`;
+    return;
+  }
+  list.forEach((t) => renderGlobalRow(host, t));
+}
+async function showGTerms() {
+  $("#gterms").style.display = "flex";
+  await loadGTerms();
+}
+$("#btnGTerms2").onclick = showGTerms;
+$("#gtermsClose").onclick = () => { $("#gterms").style.display = "none"; };
+$("#gtFilter").oninput = renderGTList;
+$("#gtAdd").onclick = async () => {
+  const jp = $("#gtAddJp").value.trim();
+  const ko = $("#gtAddKo").value.trim();
+  if (!jp || !ko) return toast("단어와 번역을 모두 입력하세요");
+  await post("/api/global_term", { jp, ko });
+  $("#gtAddJp").value = ""; $("#gtAddKo").value = "";
+  toast(`공용 용어 등록: ${jp} → ${ko}`);
+  refreshGlobalViews();
+};
+$("#gtAddKo").onkeydown = (e) => { if (e.key === "Enter") $("#gtAdd").click(); };
+
+$("#globalReapply").onclick = async () => {
+  const dry = await post("/api/reapply_terms", { dry: true });
+  if (dry.error) return toast(dry.error);
+  if (!dry.would) return toast("잔존 원문에 적용할 용어가 없습니다 (완성 번역은 대상 아님)");
+  const yes = await askConfirm(
+    `번역칸에 원문 단어가 남아 있는 ${dry.would}개 문장에\n용어집(공용+이 시나리오) 번역을 일괄 적용합니다.\n\n완성된 한국어 번역·완료 표시 문장은 건드리지 않습니다.`,
+    "네, 적용합니다");
+  if (!yes) return;
+  const r = await post("/api/reapply_terms", {});
+  if (r.error) return toast(r.error);
+  toast(`${r.applied}개 문장에 용어 재적용`);
+  renderProgress(r.stats);
+  if (STATE.curRel) openFile(STATE.curRel);
+  reloadTerms();
+};
+$("#globalExport").onclick = async () => {
+  const r = await post("/api/global_export", {});
+  if (r.error) return toast(r.error);
+  if (!r.path) return;                       // 취소
+  toast(`공용 용어 ${r.count}개 내보냄 → ${r.path}`);
+};
+$("#globalImport").onclick = async () => {
+  const r = await post("/api/global_import", {});
+  if (r.error) return toast(r.error);
+  if (!r.path) return;                       // 취소
+  let overwrite = false;
+  if (r.conflict > 0) {
+    overwrite = await askConfirm(
+      `받은 파일: 용어 ${r.total}개 (새 단어 ${r.new} · 겹침 ${r.conflict} · 동일 ${r.same})\n\n`
+      + `겹치는 단어를 받은 번역으로 덮어쓸까요?\n(아니오 = 내 번역 유지, 새 단어만 추가)`,
+      "네, 덮어씁니다");
+  }
+  const r2 = await post("/api/global_import", { path: r.path, apply: true, overwrite });
+  if (r2.error) return toast(r2.error);
+  toast(`가져오기 완료 — 추가 ${r2.added}개 · 갱신 ${r2.updated}개`);
+  refreshGlobalViews();
+};
+$("#globalOn").onchange = async () => {
+  const r = await post("/api/global_toggle", { on: $("#globalOn").checked });
+  if (r.error) return toast(r.error);
+  toast(r.on ? "공용 용어집 적용 켬" : "공용 용어집 적용 끔 (이 시나리오만)");
+  reloadTerms();
+};
 $("#btnResetFile").onclick = () => resetTranslations("file");
 $("#btnResetAll").onclick = () => resetTranslations("all");
 $("#flowClose").onclick = closeFlow;

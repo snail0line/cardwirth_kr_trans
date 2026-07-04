@@ -153,7 +153,12 @@ def _call(key: str, region: str, texts: List[str]) -> List[str]:
                     ra = 0
                 time.sleep(max(ra, min(60, 3 * 2 ** attempt)))
                 continue
-            raise AzureError(f"HTTP {e.code}: {body_txt}")
+            hint = ""
+            if e.code in (401, 403) and usage()["remaining"] <= 0:
+                hint = (f" — 이번 달 사용량 {usage()['count']:,}자로 F0 월 무료 한도"
+                        f"(200만 자)를 소진해 차단된 상태일 가능성이 높습니다"
+                        f" (다음 달 1일 리셋)")
+            raise AzureError(f"HTTP {e.code}: {body_txt}{hint}")
         except urllib.error.URLError as e:
             last = str(e)
             time.sleep(2 * (attempt + 1))
@@ -563,8 +568,9 @@ def draft_units(proj, rel: Optional[str] = None, overwrite: bool = False,
     if not targets:
         return {"translated": 0, "chars": 0, "unique": 0, "skipped": 0}
     uniq_jp = list(dict.fromkeys(jp for _, jp in targets))
-    # 용어집(번역이 입력된 단어)을 MT 에 강제 적용 — リューン→륜 같은 고정 표기
-    terms = {jp: ko for jp, ko in (proj.get("terms") or {}).items() if (ko or "").strip()}
+    # 용어집(공용+프로젝트)을 MT 에 강제 적용 — リューン→륜 같은 고정 표기
+    from . import terms as terms_mod
+    terms = terms_mod.effective_terms(proj)
     trans = translate_texts(uniq_jp, glossary=terms or None,   # fallback="skip"
                             progress=progress)
     n = 0
