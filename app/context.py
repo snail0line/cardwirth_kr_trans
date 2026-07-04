@@ -38,19 +38,21 @@ _TARGET = {"Random": "랜덤 PC", "Selected": "선택 PC", "Unselected": "비선
            "Valued": "지정 PC"}
 
 
-def _embedded_name(el) -> str:
-    """Message 대사 본문의 첫 줄이 화자 이름인 경우 추출.
-    형식: "親父\\n「おはよう…」" → 첫 줄(짧음) + 다음 줄이 「 로 시작하면 그 첫 줄이 이름.
-    초상화 파일명(CAST_012_ 등)보다 실제 이름이 우선."""
+def _embedded_name(el, cast_names=frozenset()) -> str:
+    """Message 대사 본문의 첫 줄이 화자 이름표인 경우 추출.
+    형식: "親父\n「おはよう…」" — 단, 첫 줄이 이 시나리오의 "CastCard 실명"과
+    정확히 일치할 때만 이름으로 인정한다(사용자 결정). 자유 휴리스틱(짧은 첫 줄 +
+    다음 줄 「)은 지문/독백 첫 줄 오탐("あの店の隣に　もう一軒")이 많아 폐지."""
+    if not cast_names:
+        return ""
     txt = (el.text or "").replace("\\n", "\n")
     lines = [ln.strip() for ln in txt.split("\n") if ln.strip()]
-    if len(lines) >= 2 and len(lines[0]) <= 12 \
-            and lines[0][0] not in "「#＃" and lines[1].startswith("「"):
+    if len(lines) >= 2 and lines[0] in cast_names and lines[1].startswith("「"):
         return lines[0]
     return ""
 
 
-def speaker_of(ancestors, el) -> str:
+def speaker_of(ancestors, el, cast_names=frozenset()) -> str:
     """가장 가까운 <Talk> 조상의 화자.
     - Message 본문 첫 줄이 이름 형식이면 그 이름(실제 캐릭터명 우선)
     - path(화자 이미지)가 있으면 그 이름(NPC 초상화)
@@ -60,7 +62,7 @@ def speaker_of(ancestors, el) -> str:
         if a.tag != "Talk":
             continue
         if a.get("type") == "Message":
-            nm = _embedded_name(el)
+            nm = _embedded_name(el, cast_names)
             if nm:
                 return nm
         path = a.get("path") or ""

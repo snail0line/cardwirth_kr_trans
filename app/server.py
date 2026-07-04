@@ -16,7 +16,49 @@ from urllib.parse import urlparse, parse_qs
 from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, azure_mt, search, overflow, dupchoice, update
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
+TOOLS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools"))
 HOST, PORT = "127.0.0.1", 8765
+
+# ── #X 이모지 글리프 (게임 줄바꿈 미리보기용) ──
+# CardWirthPy 스킨의 Resource/Image/Font 이미지를 그대로 서빙한다 (cw/setting.py 매핑).
+# CardWirthPy 위치는 환경변수 CWPY_DIR 또는 tools/.cwpy_path (한 줄, 깃 제외) 로 지정.
+_GLYPH_NAMES = {"a": "ANGRY", "b": "CLUB", "d": "DIAMOND", "e": "EASY", "f": "FLY",
+                "g": "GRIEVE", "h": "HEART", "j": "JACK", "k": "KISS", "l": "LAUGH",
+                "n": "NIKO", "o": "ONSEN", "p": "PUZZLE", "q": "QUICK", "s": "SPADE",
+                "w": "WORRY", "x": "X", "z": "ZAP"}
+_FONT_DIR_CACHE = [None]        # [경로 또는 ""] — 최초 1회 탐색
+
+
+def _glyph_font_dir() -> str:
+    if _FONT_DIR_CACHE[0] is not None:
+        return _FONT_DIR_CACHE[0]
+    roots = []
+    if os.environ.get("CWPY_DIR"):
+        roots.append(os.environ["CWPY_DIR"])
+    try:
+        with open(os.path.join(TOOLS_DIR, ".cwpy_path"), encoding="utf-8-sig") as f:
+            p = f.readline().strip()
+        if p:
+            roots.append(p)
+    except OSError:
+        pass
+    found = ""
+    for root in roots:
+        if os.path.basename(os.path.normpath(root)).lower() == "font" and os.path.isdir(root):
+            found = root                        # Font 폴더 직접 지정도 허용
+            break
+        skinroot = os.path.join(root, "Data", "Skin")
+        if not os.path.isdir(skinroot):
+            continue
+        for skin in sorted(os.listdir(skinroot)):
+            d = os.path.join(skinroot, skin, "Resource", "Image", "Font")
+            if os.path.isdir(d) and any(f.lower().endswith(".png") for f in os.listdir(d)):
+                found = d
+                break
+        if found:
+            break
+    _FONT_DIR_CACHE[0] = found
+    return found
 
 # 단일 사용자 로컬 툴 → 전역 현재 프로젝트
 STATE = {"proj": None}
@@ -118,7 +160,9 @@ def _file_summaries():
     out = []
     for rel, f in p["files"].items():
         free = [u for u in f["units"] if u["kind"] == "free"]
-        done = sum(1 for u in free if u.get("ko"))
+        done = sum(1 for u in free
+                   if u.get("ko") and (u.get("force_done")
+                                       or not extract.is_partial_ko(u["jp"], u["ko"])))
         # 실제 번역 내용(내부명 sysname 제외) 유무
         content = sum(1 for u in free if u.get("cat") != "sysname")
         out.append({"rel": rel, "free_total": len(free), "free_done": done,
@@ -186,6 +230,10 @@ class Handler(BaseHTTPRequestHandler):
             if not p or rel not in p["files"]:
                 return self._json({"error": "no file"}, 404)
             # 자유 텍스트만, 표시용으로 \n→실제 줄바꿈 디코드해서 전달
+            from collections import Counter
+            dup_cnt = Counter((un["field"], un["jp"])
+                              for fd in p["files"].values()
+                              for un in fd["units"] if un["kind"] == "free")
             units = []
             for un in p["files"][rel]["units"]:
                 if un["kind"] != "free":
@@ -193,6 +241,11 @@ class Handler(BaseHTTPRequestHandler):
                 d = dict(un)
                 d["jp"] = textcodec.decode_field(un["field"], un["jp"])
                 d["ko"] = textcodec.decode_field(un["field"], un.get("ko", ""))
+                n_dup = dup_cnt[(un["field"], un["jp"])]
+                if n_dup > 1:
+                    d["dups"] = n_dup       # 동일 원문 총 개수 (배지 표시용)
+                if extract.is_partial_ko(un["jp"], un.get("ko", ""))                         and not un.get("force_done"):
+                    d["partial"] = True     # 가나 잔존 = 부분 번역 (명시 완료 제외)
                 units.append(d)
             return self._json({"rel": rel, "units": units})
         if u.path == "/api/search":
@@ -231,7 +284,13 @@ class Handler(BaseHTTPRequestHandler):
                 root = ET.parse(os.path.join(p["scenario_dir"], rel)).getroot()
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
-            return self._json({"rel": rel, "outline": outline.build_outline(root, resolve)})
+            nd = outline.NameDisplay(p)
+            content = {r2 for r2, fd in p["files"].items()
+                       if any(un["kind"] == "free" and un.get("cat") != "sysname"
+                              for un in fd["units"])}
+            return self._json({"rel": rel,
+                               "outline": outline.build_outline(root, resolve, nd,
+                                                                content_rels=content)})
         if u.path == "/api/flow":
             p = STATE["proj"]
             if not p:
@@ -245,8 +304,17 @@ class Handler(BaseHTTPRequestHandler):
                            for un in fd["units"])
                 }
             f = flow.build_flow(p["scenario_dir"], content_rels=content_rels)
+            # 노드 라벨에 표시명(정식 번역/툴 전용 이름) 적용 — 원문은 id2name 으로 전달
+            nd = outline.NameDisplay(p)
+            orig = {rel: n["label"] for rel, n in f["nodes"].items()}
+            for rel, n in f["nodes"].items():
+                n["label"] = nd.scene_name(rel, n["label"])
             # 패키지 호출(Call type=Package) 엣지로 Area↔Package 실제 흐름을 그린다
-            return self._json(flow.to_mermaid(f))
+            mm = flow.to_mermaid(f)
+            mm["id2name"] = {f["nid"][rel]: orig[rel] for rel in f["nodes"]}
+            mm["id2tool"] = {f["nid"][rel]: nd.tool.get(orig[rel].strip(), "")
+                             for rel in f["nodes"]}
+            return self._json(mm)
 
         if u.path == "/api/update_check":
             return self._json(update.check())
@@ -259,6 +327,43 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/azure_usage":
             return self._json({"ok": True, **azure_mt.usage()})
+
+        if u.path == "/api/fontglyph":
+            c = (q.get("c", [""])[0] or "").lower()
+            d = _glyph_font_dir()
+            name = _GLYPH_NAMES.get(c)
+            if d and name:
+                fp = os.path.join(d, name + ".png")
+                if os.path.isfile(fp):
+                    return self._file(fp, "image/png")
+            return self._json({"error": "no glyph"}, 404)
+
+        if u.path == "/api/dup_where":
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            rel = q.get("rel", [""])[0]
+            uid = int(q.get("id", ["0"])[0])
+            src = next((x for x in p["files"].get(rel, {}).get("units", [])
+                        if x["id"] == uid and x["kind"] == "free"), None)
+            if src is None:
+                return self._json({"error": "no unit"}, 404)
+            key = (src["field"], src["jp"])
+            out = []
+            for rel2, f2 in p["files"].items():
+                for u2 in f2["units"]:
+                    if u2["kind"] == "free" and (u2["field"], u2["jp"]) == key:
+                        out.append({"rel": rel2, "sid": u2["id"],
+                                    "cat": u2.get("cat"),
+                                    "done": bool(u2.get("ko")),
+                                    "me": rel2 == rel and u2["id"] == uid})
+            return self._json({"results": out})
+
+        if u.path == "/api/mt_failed":
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            return self._json({"results": azure_mt.failed_units(p)})
 
         if u.path == "/api/deepl_count":
             p = STATE["proj"]
@@ -331,20 +436,42 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "no project"}, 400)
             kind = data.get("kind")
             ko = data.get("ko", "")
+            propagated = 0
             if kind == "free":
                 rel, uid = data["rel"], data["id"]
+                src_unit = None
                 for unit in p["files"][rel]["units"]:
                     if unit["id"] == uid and unit["kind"] == "free":
                         # #text 만 CardWirth 이스케이프(\\·\n), 속성(@name 선택지 등)은 raw 저장
                         unit["ko"] = textcodec.encode_field(unit["field"], ko)
+                        # [완료로 표시]의 명시 완료 — 가나가 남아도 완료로 인정
+                        if ko and data.get("force_done"):
+                            unit["force_done"] = True
+                        else:
+                            unit.pop("force_done", None)
+                        src_unit = unit
                         break
+                # 동일 원문 자동 전파 — 캐스트카드 설명이 에어리어 메뉴카드에 복사되는
+                # 구조 등, 같은 (field, jp) 의 "미번역" 칸을 같은 번역으로 채운다.
+                # 이미 번역된 칸은 건드리지 않는다(문맥별로 다르게 고친 것 보호).
+                if src_unit is not None and ko.strip():
+                    key = (src_unit["field"], src_unit["jp"])
+                    for f2 in p["files"].values():
+                        for u2 in f2["units"]:
+                            if u2 is src_unit or u2["kind"] != "free" \
+                                    or u2.get("ko") or u2.get("control"):
+                                continue
+                            if (u2["field"], u2["jp"]) == key:
+                                u2["ko"] = textcodec.encode_field(u2["field"], ko)
+                                u2.pop("mt_failed", None)
+                                propagated += 1
             elif kind == "entity":
                 gk = data["gkey"]
                 if gk in p["glossary"]:
                     p["glossary"][gk]["ko"] = ko
             else:
                 return self._json({"error": "bad kind"}, 400)
-            return self._json({"ok": True, "stats": _stats()})
+            return self._json({"ok": True, "stats": _stats(), "propagated": propagated})
 
         if u.path == "/api/term":
             if not p:
@@ -357,6 +484,9 @@ class Handler(BaseHTTPRequestHandler):
                 terms.set_word(p, jp, ko)
                 if kind == "manual":
                     terms.add_manual(p, jp, ko)  # 수동 용어 번역 갱신
+                if ko:
+                    # 부분 번역(🈁)에 남아 있는 원문 단어를 즉시 치환
+                    applied = terms.apply_word_to_existing(p, jp, ko)
             return self._json({"ok": True, "applied": applied, "stats": _stats()})
 
         if u.path == "/api/term_add":
@@ -373,6 +503,22 @@ class Handler(BaseHTTPRequestHandler):
             if not p:
                 return self._json({"error": "no project"}, 400)
             terms.remove_manual(p, (data.get("jp") or "").strip())
+            project.save(p)
+            return self._json({"ok": True})
+
+        if u.path == "/api/tool_name":
+            # 툴 전용 표시 이름(흐름 패널/흐름 보기 라벨 번역) — export 에 안 들어감
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            name = (data.get("name") or "").strip()
+            ko = (data.get("ko") or "").strip()
+            if not name:
+                return self._json({"error": "이름이 비었습니다"}, 400)
+            tn = p.setdefault("tool_names", {})
+            if ko and ko != name:
+                tn[name] = ko
+            else:
+                tn.pop(name, None)      # 빈 값/원문 그대로 = 표시명 제거(원문으로)
             project.save(p)
             return self._json({"ok": True})
 
@@ -467,7 +613,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
             project.save(p)
-            return self._json({"ok": True, "result": res, "stats": _stats()})
+            return self._json({"ok": True, "result": res, "stats": _stats(),
+                               "failed": azure_mt.failed_units(p)})
 
         if u.path == "/api/update_apply":
             try:

@@ -84,21 +84,35 @@ def merge(old: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str, Any]:
     # 수동 추가 용어 보존
     if old.get("terms_manual"):
         fresh["terms_manual"] = list(old["terms_manual"])
+    # 툴 전용 표시 이름(흐름 패널/흐름 보기 라벨 번역 — export 에 안 들어감) 보존
+    if old.get("tool_names"):
+        fresh["tool_names"] = dict(old["tool_names"])
     # 글로서리: 같은 gkey 의 ko 보존
     for k, g in fresh["glossary"].items():
         if k in old.get("glossary", {}) and old["glossary"][k].get("ko"):
             g["ko"] = old["glossary"][k]["ko"]
     # 자유 유닛: (파일, jp) 기준으로 ko 보존 (id 가 흔들려도 원문 매칭)
     old_free = {}
+    old_failed = {}     # 자동번역 복원 실패 마커도 보존 (경고 패널 추적용)
     for rel, f in old.get("files", {}).items():
         for u in f["units"]:
-            if u["kind"] == "free" and u.get("ko"):
-                old_free.setdefault(rel, {})[(u["field"], u["jp"])] = u["ko"]
+            if u["kind"] != "free":
+                continue
+            if u.get("ko"):
+                old_free.setdefault(rel, {})[(u["field"], u["jp"])] =                     (u["ko"], bool(u.get("force_done")))
+            elif u.get("mt_failed"):
+                old_failed.setdefault(rel, set()).add((u["field"], u["jp"]))
     for rel, f in fresh["files"].items():
         m = old_free.get(rel, {})
+        fm = old_failed.get(rel, set())
         for u in f["units"]:
-            if u["kind"] == "free":
-                ko = m.get((u["field"], u["jp"]))
-                if ko:
-                    u["ko"] = ko
+            if u["kind"] != "free":
+                continue
+            hit = m.get((u["field"], u["jp"]))
+            if hit:
+                u["ko"] = hit[0]
+                if hit[1]:
+                    u["force_done"] = True
+            elif (u["field"], u["jp"]) in fm:
+                u["mt_failed"] = True
     return fresh

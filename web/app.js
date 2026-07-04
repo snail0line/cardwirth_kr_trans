@@ -36,12 +36,69 @@ const FONT_COLORS = {
 
 // 텍스트를 게임처럼 strlen 한계(units)로 접어 줄 배열로 반환. 각 줄은 {color,text} 런 배열.
 // &X 색코드는 폭 0(줄바꿈 계산에서 제외)이며, 색은 줄바꿈·명시적 \n 을 넘어 유지된다.
+// #X 이모지 글리프(스킨 Resource/Image/Font, cw/setting.py 매핑) — 유니코드 근사.
+// 게임은 현재 폰트색을 곱연산 틴트하므로(BLEND_RGBA_MULT) 기호형 글리프엔 런 색이 그대로 먹는다.
+// 폭은 게임과 동일하게 전각 1글자(2단위) 취급. 대소문자 무관.
+const FONT_GLYPHS = {
+  a: "💢", b: "♣", d: "♦", e: "☺", f: "🪰", g: "😢", h: "♥", j: "🃏", k: "💋",
+  l: "😆", n: "🙂", o: "♨", p: "🧩", q: "💨", s: "♠", w: "😟", x: "✖", z: "⚡",
+};
+
+// 스킨 글리프 이미지 캐시 — 서버(/api/fontglyph)에서 실제 스킨 PNG 를 받아,
+// 게임과 같은 곱연산(BLEND_RGBA_MULT)으로 현재 폰트색을 틴트해 표시한다.
+// 이미지를 못 찾으면(CardWirthPy 경로 미설정 등) 유니코드 근사(FONT_GLYPHS)로 폴백.
+const GLYPH_IMGS = {};
+function loadGlyph(letter) {
+  if (!(letter in GLYPH_IMGS)) {
+    GLYPH_IMGS[letter] = new Promise((res) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => res(null);
+      img.src = "/api/fontglyph?c=" + letter;
+    });
+  }
+  return GLYPH_IMGS[letter];
+}
+function glyphEl(letter, color) {
+  const holder = document.createElement("span");
+  holder.className = "gp-glyph";
+  holder.textContent = FONT_GLYPHS[letter] || "#" + letter;   // 로드 전/실패 폴백
+  loadGlyph(letter).then((img) => {
+    if (!img) return;
+    // 1) 마젠타(#FF00FF) 컬러키 → 투명 (classic 리소스 투명색 규약)
+    const base = document.createElement("canvas");
+    base.width = img.width; base.height = img.height;
+    const bg = base.getContext("2d");
+    bg.drawImage(img, 0, 0);
+    const px = bg.getImageData(0, 0, base.width, base.height);
+    const d = px.data;
+    for (let k = 0; k < d.length; k += 4) {
+      if (d[k] === 255 && d[k + 1] === 0 && d[k + 2] === 255) d[k + 3] = 0;
+    }
+    bg.putImageData(px, 0, 0);
+    // 2) 색 곱연산 틴트 (BLEND_RGBA_MULT) 후 알파 복원
+    const cv = document.createElement("canvas");
+    cv.width = base.width; cv.height = base.height;
+    const g = cv.getContext("2d");
+    g.drawImage(base, 0, 0);
+    g.globalCompositeOperation = "multiply";
+    g.fillStyle = color || "#ffffff";            // 기본 폰트색 = 흰색 → 원본 그대로
+    g.fillRect(0, 0, cv.width, cv.height);
+    g.globalCompositeOperation = "destination-in";
+    g.drawImage(base, 0, 0);
+    cv.className = "gp-glyph";
+    cv.title = "#" + letter;
+    if (holder.isConnected) holder.replaceWith(cv);
+  });
+  return holder;
+}
+
 function wrapForGameRuns(text, units) {
   const lines = [];
   let cur = [], color = "", w = 0;
   const push = (ch) => {
     const last = cur[cur.length - 1];
-    if (last && last.color === color) last.text += ch;
+    if (last && !last.glyph && last.color === color) last.text += ch;   // 글리프 run 에는 병합 금지
     else cur.push({ color, text: ch });
   };
   const newline = () => { lines.push(cur); cur = []; w = 0; };
@@ -52,6 +109,12 @@ function wrapForGameRuns(text, units) {
       color = FONT_COLORS[text[++i].toLowerCase()] || "";     // 미정의·&w → 기본색
       continue;
     }
+    if (ch === "#" && FONT_GLYPHS[(text[i + 1] || "").toLowerCase()]) {  // 이모지 글리프(전각 폭)
+      if (w + 2 > units && w > 0) newline();
+      cur.push({ glyph: text[++i].toLowerCase(), color });   // 스킨 이미지로 렌더(색상 틴트)
+      w += 2;
+      continue;
+    }
     const cw = charUnits(ch);
     if (w + cw > units && w > 0) newline();
     push(ch); w += cw;
@@ -60,14 +123,25 @@ function wrapForGameRuns(text, units) {
   return lines;
 }
 
-// 카드 해설용 평문 줄바꿈 — 색코드/치환 해석 없이 있는 그대로 units 폭으로 접는다(wx 다이얼로그).
+// 카드 해설용 평문 줄바꿈 — cw/util.txtwrap mode=1 재현(wx 다이얼로그).
+// 엔진 규칙: ①다음 글자가 반각(줄 끝 개행 포함)이면 폭 +1 허용 — 전각 19자 줄(38단위)이
+//   안 접히는 이유. ②행두 금지 문자(WRAP_HANG)는 줄 끝에 매달아 넘겨쓰기(ぶら下げ).
+const WRAP_HANG = "｡|､|，|、|。|．|）|」|』|〕|｝|】";   // util.WRAPS_CHARS
 function wrapPlain(text, units) {
   const out = [];
   for (const raw of text.split("\n")) {
     let line = "", w = 0;
-    for (const ch of raw) {
+    const chars = [...raw];
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
       const cw = charUnits(ch);
-      if (w + cw > units && line !== "") { out.push(line); line = ""; w = 0; }
+      if (w + cw > units && line !== "") {
+        const next = chars[i + 1];
+        const bonus = (next === undefined || charUnits(next) === 1) ? 1 : 0;  // 다음이 반각/줄끝
+        if (!(WRAP_HANG.includes(ch) || w + cw <= units + bonus)) {
+          out.push(line); line = ""; w = 0;
+        }
+      }
       line += ch; w += cw;
     }
     out.push(line);
@@ -102,7 +176,7 @@ function tidyText(text) {
 // 치환자(변수·이름 코드) — 게임 실행 시 값으로 치환된다(message.py _rpl_specialstr).
 // 에디터엔 그 상태가 없으니 사용자가 값을 넣어 미리볼 수 있게 한다. 값은 세션 전역 공유.
 const SUBST = {};                                        // 토큰 → 대체 텍스트
-const SUBST_RE = /(\$[^$\n]+\$|%[^%\n]+%|#[A-Za-z])/g;   // $..$ / %..% 변수, #x 이름코드
+const SUBST_RE = /(\$[^$\n]+\$|%[^%\n]+%|#[MURICYTmuricyt])/g;   // $..$ / %..% 변수, #x 이름코드(이모지 글리프 #e 등 제외)
 const SHARP_LABEL = {                                    // #코드 뜻
   "#m": "선택 캐릭터명", "#u": "비선택 캐릭터명", "#r": "랜덤 캐릭터명",
   "#i": "화자명", "#c": "사용 카드명", "#y": "숙소 이름", "#t": "파티 이름",
@@ -115,6 +189,17 @@ function findSubstTokens(text) {
 }
 function applySubst(text) {
   return text.replace(SUBST_RE, (t) => (SUBST[t] ? SUBST[t] : t));   // 값 없으면 토큰 그대로
+}
+
+// 가나가 남은 번역 = 부분 번역(용어 치환 초안 등) — 완료로 치지 않는다.
+// 단 ko === jp(원문 그대로 완료)는 의도적 유지로 완료 인정 (extract.is_partial_ko 와 동일)
+const KANA_RE = /[ぁ-ゖァ-ヺｦ-ﾝ]/;
+function isPartial(u) {
+  return !!u.ko && u.ko !== u.jp && KANA_RE.test(u.ko) && !u.force_done;
+}
+// 완료 판정 — 번역 있음 + (가나 없음 or 명시 완료[force_done])
+function isDone(u) {
+  return !!u.ko && !isPartial(u);
 }
 
 function toast(msg) {
@@ -209,7 +294,7 @@ async function openScenario() {
 }
 
 function unitVisible(u) {
-  if ($("#hideDone").checked && u.ko) return false;
+  if ($("#hideDone").checked && isDone(u)) return false;
   // %상태변수% 를 표시하는 메시지는 control(읽기전용)이라도 맥락 확인용으로 항상 표시
   if ($("#hideControl").checked && u.control && !(u.varrefs && u.varrefs.length)) return false;
   return true;
@@ -256,39 +341,231 @@ function renderListView(rel) {
 
 // 흐름 보기: 이벤트 진행 순서(패키지 콜/링크/분기 포함) 타임라인
 const OL_ICON = { start: "▶", talk: "💬", branch: "❖", call: "»", link: "↪", change: "⇒", end: "■", misc: "·" };
+// 흐름 보기 내비게이션 스택: 호출로 들어갈 때마다 프레임을 쌓아, 중첩 호출에서
+// 돌아와도 바깥 호출원을 잃지 않는다. 프레임 = {from, calls, idx, target}
+let FLOWSTACK = [];
+// 흐름 보기 모드: "file" = 파일 이동 + 호출원/다음 배너, "linear" = 호출 인라인 펼침
+let FLOWMODE = localStorage.getItem("flowmode") || "file";
+
+// 일렬 모드: rel 의 아웃라인에 패키지 호출 대상 파일의 아웃라인을 진행 순서대로
+// 재귀로 이어붙인다. 같은 패키지는 첫 호출에서만 펼치고(expanded), 재호출 지점은
+// "앞에서 이미 펼쳐짐" 표시만 남긴다 — 같은 내용이 여러 번 보여 헷갈리는 것 방지.
+// visited = 현재 경로(순환 차단), 깊이 8 제한. maps[rel] = 유닛 id 맵.
+async function buildLinearOutline(rel, depth, visited, maps, out, expanded) {
+  const r = await api("/api/outline?rel=" + encodeURIComponent(rel));
+  if (r.error || !r.outline) return;
+  if (!maps[rel]) {
+    const fr = await api("/api/file?rel=" + encodeURIComponent(rel));
+    const m = {};
+    (fr.units || []).forEach((u) => { m[u.id] = u; });
+    maps[rel] = m;
+  }
+  for (const e of r.outline) {
+    e.src_rel = rel;
+    e.depth = (e.depth || 0) + depth;
+    out.push(e);
+    if (e.kind === "call" && e.target_rel && depth < 8) {
+      if (visited.has(e.target_rel) || expanded.has(e.target_rel)) {
+        e.repeat = true;                // 이미 위에서 펼쳐진 패키지의 재호출
+      } else {
+        e.inlined = true;               // 호출 줄 바로 아래에 내용이 펼쳐짐
+        expanded.add(e.target_rel);
+        visited.add(e.target_rel);
+        await buildLinearOutline(e.target_rel, e.depth + 1, visited, maps, out, expanded);
+        visited.delete(e.target_rel);
+      }
+    }
+  }
+}
+
 async function renderFlowView(rel) {
   const box = $("#units");
   box.innerHTML = `<div class="empty">흐름 불러오는 중…</div>`;
-  const r = await api("/api/outline?rel=" + encodeURIComponent(rel));
+  const maps = { [rel]: STATE.unitById };
+  let outlineList;
+  if (FLOWMODE === "linear") {
+    outlineList = [];
+    await buildLinearOutline(rel, 0, new Set([rel]), maps, outlineList, new Set());
+  } else {
+    const r = await api("/api/outline?rel=" + encodeURIComponent(rel));
+    if (r.error || !r.outline) { box.innerHTML = `<div class="empty">흐름 정보 없음</div>`; return; }
+    outlineList = r.outline;
+    outlineList.forEach((e) => { e.src_rel = rel; });
+  }
   box.innerHTML = "";
-  if (r.error || !r.outline) { box.innerHTML = `<div class="empty">흐름 정보 없음</div>`; return; }
   const wrap = document.createElement("div");
   wrap.className = "outline";
-  r.outline.forEach((e) => {
+
+  // 모드 전환 바
+  const modeBar = document.createElement("div");
+  modeBar.className = "ol-modebar";
+  const modeLab = document.createElement("label");
+  const modeCb = document.createElement("input");
+  modeCb.type = "checkbox";
+  modeCb.checked = FLOWMODE === "linear";
+  modeCb.onchange = () => {
+    FLOWMODE = modeCb.checked ? "linear" : "file";
+    localStorage.setItem("flowmode", FLOWMODE);
+    FLOWSTACK = [];
+    renderFlowView(rel);
+  };
+  modeLab.appendChild(modeCb);
+  modeLab.appendChild(document.createTextNode(
+    " 🧵 일렬로 쭉 보기 — 패키지 호출 내용을 진행 순서대로 그 자리에 펼침"));
+  modeBar.appendChild(modeLab);
+  wrap.appendChild(modeBar);
+
+  // 말투 변형(口調 분기)이 별도 Talk 로 흩어진 경우(구조 B)도 한 묶음으로 —
+  // 연속된 talk 항목의 유닛이 같은 파일 + 같은 group 이면 하나의 말투 그룹으로 병합.
+  const entries = [];
+  outlineList.forEach((e) => {
     if (e.kind === "talk") {
-      const ids = (e.unit_ids || []).map((id) => STATE.unitById[id]).filter(Boolean);
+      const m = maps[e.src_rel] || {};
+      const ids = (e.unit_ids || []).map((id) => m[id]).filter(Boolean);
       if (!ids.length) return;
+      const g = ids[0].group != null && ids.every((u) => u.group === ids[0].group)
+        ? ids[0].group : null;
+      const last = entries[entries.length - 1];
+      if (g != null && last && last.kind === "talk" && last.group === g
+          && last.src_rel === e.src_rel) {
+        last.units.push(...ids);            // 같은 말투 그룹 → 앞 항목에 병합
+        return;
+      }
+      entries.push({ kind: "talk", depth: e.depth, units: ids, group: g, src_rel: e.src_rel });
+    } else {
+      entries.push(e);
+    }
+  });
+  // 파일 모드: 호출로 들어온 파일이면 호출원·다음 순서 배너 (상단 + 하단 ⏭)
+  // 스택 최상단 프레임만 이 파일에 해당할 때 표시. 복귀는 pop → 바깥 호출원 배너가 살아난다.
+  const top = FLOWSTACK[FLOWSTACK.length - 1];
+  const navBar = (bottom) => {
+    if (FLOWMODE === "linear" || !top || top.target !== rel) return null;
+    // 호출원이 같은 패키지를 (조건 분기 가지마다) 연달아 호출하는 경우가 있어,
+    // "다음"은 지금 파일이 아닌 첫 호출까지 건너뛴다
+    let ni = top.idx + 1;
+    while (top.calls[ni] && top.calls[ni].target_rel === rel) ni++;
+    const next = top.calls[ni];
+    const bar = document.createElement("div");
+    bar.className = "ol-navbar";
+    const backName = top.from.split(/[\\/]/).pop().replace(/\.xml$/i, "");
+    const goBack = () => { FLOWSTACK.pop(); openFile(top.from); };
+    if (!bottom) {
+      const back = document.createElement("span");
+      back.className = "ol-navlink";
+      back.textContent = "↩ 호출원: " + backName;
+      back.title = "클릭 → " + top.from + " (이 파일을 호출한 곳으로 복귀)";
+      back.onclick = goBack;
+      bar.appendChild(back);
+    }
+    if (next) {
+      const nx = document.createElement("span");
+      nx.className = "ol-navlink ol-navnext";
+      nx.textContent = "⏭ 다음: " + next.desc.replace(/ 호출$/, "");
+      nx.title = "클릭 → " + next.target_rel;
+      nx.onclick = () => {
+        top.idx = ni;
+        top.target = next.target_rel;
+        openFile(next.target_rel);
+      };
+      bar.appendChild(nx);
+    } else if (bottom) {
+      // 마지막 호출 안내는 다 읽고 내려온 하단에만 (상단은 ↩ 호출원 링크로 충분)
+      const nx = document.createElement("span");
+      nx.className = "ol-navlink ol-navnext";
+      nx.textContent = `↩ 여기가 마지막 — 「${backName}」(으)로 돌아가세요`;
+      nx.title = "클릭 → " + top.from + " (호출원으로 복귀)";
+      nx.onclick = goBack;
+      bar.appendChild(nx);
+    }
+    return bar;
+  };
+  const topBar = navBar(false);
+  if (topBar) wrap.appendChild(topBar);
+
+  entries.forEach((e) => {
+    const indent = Math.min(e.depth || 0, 12) * 18;
+    if (e.kind === "talk") {
+      const ids = e.units;
       const row = document.createElement("div");
       row.className = "ol-talk";
-      row.style.marginLeft = (e.depth * 18) + "px";
-      // 말투 변형이면 묶음, 아니면 단일
-      if (ids.length > 1 && ids[0].group != null) row.appendChild(toneGroupEl(rel, ids));
-      else ids.forEach((u) => row.appendChild(freeUnitEl(rel, u)));
+      row.style.marginLeft = indent + "px";
+      // 말투 변형이면 묶음, 아니면 단일 (유닛은 자기 파일(src_rel)로 저장)
+      if (ids.length > 1 && ids[0].group != null) row.appendChild(toneGroupEl(e.src_rel, ids));
+      else ids.forEach((u) => row.appendChild(freeUnitEl(e.src_rel, u)));
       wrap.appendChild(row);
     } else {
       const row = document.createElement("div");
       row.className = "ol-mark ol-" + e.kind;
-      row.style.marginLeft = (e.depth * 18) + "px";
+      row.style.marginLeft = indent + "px";
       row.innerHTML = `<span class="ol-ic">${OL_ICON[e.kind] || "·"}</span> <span class="ol-desc"></span>`;
       row.querySelector(".ol-desc").textContent = e.desc;
-      if (e.target_rel) {
+      if (e.repeat) {
+        // 일렬 모드: 이미 위에서 펼친 패키지의 재호출 — 내용 중복 없이 표시만
+        row.querySelector(".ol-desc").textContent = e.desc + " — ↑ 앞에서 이미 펼쳐짐";
+        row.title = e.target_rel;
+      } else if (e.inlined) {
+        // 일렬 모드: 내용이 바로 아래 펼쳐져 있으므로 이동 없음 — 구간 머리 역할
+        row.classList.add("ol-inlined");
+        row.title = "아래에 펼쳐져 있음 · " + e.target_rel;
+      } else if (e.target_rel) {
         row.classList.add("ol-jump");
         row.title = "클릭 → " + e.target_rel;
-        row.onclick = () => openFile(e.target_rel);
+        row.onclick = () => {
+          if (FLOWMODE !== "linear" && e.kind === "call") {
+            // 호출 = 끝나면 이 파일로 복귀. 다른 파일을 헤매다 왔으면 스택을 이 파일
+            // 기준으로 정리한 뒤 프레임을 쌓는다 (중첩 호출도 복귀 경로 유지).
+            while (FLOWSTACK.length && FLOWSTACK[FLOWSTACK.length - 1].target !== rel)
+              FLOWSTACK.pop();
+            const calls = entries.filter((x) => x.kind === "call" && x.target_rel);
+            FLOWSTACK.push({ from: rel, calls, idx: calls.indexOf(e), target: e.target_rel });
+          } else if (e.kind !== "call") {
+            FLOWSTACK = [];    // 이동(Link/Change)은 복귀 없음
+          }
+          openFile(e.target_rel);
+        };
+      }
+      // 이름 붙은 줄(칭호/플래그/스텝/스타트/패키지/에리어) — 툴 전용 표시명 편집
+      if (e.name) {
+        row.title = (row.title ? row.title + " · " : "") + "원문: " + e.name;
+        const ed = document.createElement("button");
+        ed.className = "ol-edit";
+        ed.textContent = "✏";
+        ed.title = "툴에서만 보일 이름 입력 (내보내기에 안 들어감, 비우면 원문)";
+        ed.onclick = (ev) => {
+          ev.stopPropagation();
+          if (row.querySelector(".ol-editbox")) return;
+          const inp = document.createElement("input");
+          inp.type = "text"; inp.className = "ol-editbox";
+          inp.placeholder = e.name;
+          inp.value = e.tool_ko || e.name;   // 일부만 고쳐 쓸 수 있게 현재값/원문 프리필
+          inp.onclick = (x) => x.stopPropagation();
+          let cancelled = false;
+          const save = async () => {
+            if (cancelled) return;
+            cancelled = true;                       // blur+Enter 중복 저장 방지
+            const v = inp.value.trim();
+            if (v === (e.tool_ko || e.name)) { inp.remove(); return; }  // 변경 없음
+            const r2 = await post("/api/tool_name", { name: e.name, ko: v });
+            if (r2.error) return toast(r2.error);
+            toast("표시 이름 저장 (툴에서만 보임)");
+            renderFlowView(rel);
+          };
+          inp.onblur = save;                        // 포커스 아웃 = 자동 저장
+          inp.onkeydown = (x) => {
+            if (x.key === "Escape") { cancelled = true; inp.remove(); }
+            else if (x.key === "Enter") inp.blur();
+          };
+          ed.after(inp);
+          inp.focus();
+        };
+        row.appendChild(ed);
       }
       wrap.appendChild(row);
     }
   });
+  const botBar = navBar(true);
+  if (botBar) wrap.appendChild(botBar);
   box.appendChild(wrap);
 }
 
@@ -385,9 +662,10 @@ function toneGroupEl(rel, grp) {
 
 function freeUnitEl(rel, u, skipAlt) {
   const el = document.createElement("div");
-  el.className = "unit" + (u.ko ? " done" : "") + (u.control ? " control" : "");
+  el.className = "unit" + (isDone(u) ? " done" : "") + (u.control ? " control" : "");
   el.dataset.sid = u.id;
-  const CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "제목", desc: "설명", sysname: "내부명", varvalue: "변수값" };
+  el.dataset.rel = rel;   // 일렬 모드에서 같은 유닛의 다른 펼침 사본 동기화용
+  const CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "카드 이름", desc: "카드 설명", scnname: "시나리오 제목", scndesc: "시나리오 설명", sysname: "내부명", varvalue: "변수값" };
   const catBadge = u.cat ? `<span class="badge cat-${u.cat}">${CAT[u.cat] || u.cat}</span>` : "";
   const left = document.createElement("div");
   const spk = u.speaker ? `<span class="badge spk">🗣 ${esc(u.speaker)}</span>` : "";
@@ -407,6 +685,35 @@ function freeUnitEl(rel, u, skipAlt) {
     b.onclick = () => jumpToVarDef(name);
     meta.appendChild(b);
   });
+  if (isPartial(u)) {
+    const b = document.createElement("span");
+    b.className = "badge partial";
+    b.textContent = "🈁 일본어 남음";
+    b.title = "번역문에 가나가 남아 있어 완료로 세지 않습니다 (용어 치환 초안 등)";
+    meta.appendChild(b);
+  }
+  if (u.dups > 1) {
+    const b = document.createElement("span");
+    b.className = "badge dup";
+    b.textContent = `동일 원문 ×${u.dups}`;
+    b.title = "클릭하면 같은 원문의 위치 목록을 보여줍니다. 번역하면 미번역 동일 원문에 자동 적용됩니다";
+    let listEl = null;
+    b.onclick = async () => {
+      if (listEl) { listEl.remove(); listEl = null; return; }
+      const r = await api(`/api/dup_where?rel=${encodeURIComponent(rel)}&id=${u.id}`);
+      listEl = document.createElement("div");
+      listEl.className = "dup-where";
+      (r.results || []).forEach((m) => {
+        const row = document.createElement("div");
+        row.className = "dup-where-row" + (m.me ? " me" : "");
+        row.textContent = `${m.me ? "▶ " : ""}${m.rel}  ${m.done ? "✓ 번역됨" : "미번역"}`;
+        if (!m.me) row.onclick = () => jumpTo(m.rel, m.sid);
+        listEl.appendChild(row);
+      });
+      meta.parentElement.insertBefore(listEl, meta.nextSibling);
+    };
+    meta.appendChild(b);
+  }
   if (u.cat === "varvalue" && u.varname) {
     const nameB = document.createElement("span");
     nameB.className = "badge ent";
@@ -445,14 +752,23 @@ function freeUnitEl(rel, u, skipAlt) {
 
   // ko 변경을 서버에 반영 (onblur·되돌리기 공용)
   let markDoneBtn = null;   // [완료로 표시] — 완료 상태에 따라 표시/숨김
-  const commit = async (newKo) => {
-    if (newKo === (u.ko || "")) return;
+  const commit = async (newKo, force = false) => {
+    if (newKo === (u.ko || "") && force === !!u.force_done) return;
     u.ko = newKo;
-    el.classList.toggle("done", !!u.ko);
-    if (markDoneBtn) markDoneBtn.style.display = u.ko ? "none" : "";
-    const res = await post("/api/set", { kind: "free", rel, id: u.id, ko: newKo });
+    u.force_done = force && !!newKo;    // 일반 편집은 명시 완료 해제
+    el.classList.toggle("done", isDone(u));
+    if (markDoneBtn) markDoneBtn.style.display = isDone(u) ? "none" : "";
+    const res = await post("/api/set", { kind: "free", rel, id: u.id, ko: newKo, force_done: u.force_done });
     renderProgress(res.stats);
+    if (res.propagated) toast(`동일 원문 ${res.propagated}곳에 함께 적용했어요`);
     api("/api/state").then((s) => { STATE.files = s.files || []; renderFileList(); });
+    // 일렬 모드: 같은 패키지가 여러 번 펼쳐져 있으면 다른 사본의 화면도 즉시 갱신
+    document.querySelectorAll(`.unit[data-sid="${u.id}"]`).forEach((other) => {
+      if (other === el || other.dataset.rel !== rel) return;
+      const t2 = other.querySelector("textarea");
+      if (t2) t2.value = newKo || u.jp;
+      other.classList.toggle("done", isDone(u));
+    });
   };
 
   ta.onblur = () => {
@@ -464,7 +780,7 @@ function freeUnitEl(rel, u, skipAlt) {
   // 게임 창 미리보기 — 메시지창(대사/나레이션)에만. 카드 설명(CastCard/ItemCard/SkillCard)은
   // centering_y=True(card.py) 라 7줄 초과해도 안 잘리고 폭도 달라서 미리보기를 붙이지 않는다.
   const isMsg = u.cat === "dialogue" || u.cat === "narration";
-  const isCard = u.cat === "desc";   // 카드 해설(CastCard/ItemCard/SkillCard) = 별도 미리보기
+  const isCard = u.cat === "desc" || u.cat === "scndesc";   // 카드 해설(CastCard/ItemCard/SkillCard) = 별도 미리보기
   const preview = document.createElement("div");
   preview.className = "game-preview";
   const limit = u.img ? LINE_UNITS_IMG : LINE_UNITS;   // 그림 있으면 33, 없으면 43
@@ -487,7 +803,9 @@ function freeUnitEl(rel, u, skipAlt) {
         d.textContent = " ";                     // 빈 줄도 높이 유지
       } else {
         runs.forEach((run) => {
-          if (run.color) {
+          if (run.glyph) {
+            d.appendChild(glyphEl(run.glyph, run.color));
+          } else if (run.color) {
             const sp = document.createElement("span");
             sp.style.color = run.color;
             sp.textContent = run.text;
@@ -582,9 +900,9 @@ function freeUnitEl(rel, u, skipAlt) {
   markDoneBtn.type = "button";
   markDoneBtn.className = "unit-reset";
   markDoneBtn.textContent = "✓ 완료로 표시";
-  markDoneBtn.title = "원문 그대로 두어도 되는 문장을 번역 완료로 표시합니다 (되돌리기 = ↺ 원문으로)";
-  markDoneBtn.onclick = () => commit(ta.value || u.jp);
-  if (u.ko) markDoneBtn.style.display = "none";
+  markDoneBtn.title = "이 내용 그대로 번역 완료로 표시합니다 — 원문 유지(♪ 등)나 일본어가 남은 부분 번역도 확정할 수 있습니다 (되돌리기 = ↺ 원문으로)";
+  markDoneBtn.onclick = () => commit(ta.value || u.jp, true);
+  if (isDone(u)) markDoneBtn.style.display = "none";
   bar.appendChild(markDoneBtn);
 
   // "정돈" — 문단 안 수동 줄바꿈을 없애 8줄 넘침을 완화. 메시지창에서 넘칠 때만 노출.
@@ -641,6 +959,12 @@ function renderTermList(host, list, kind) {
     const jp = document.createElement("span");
     jp.className = "term-jp";
     jp.innerHTML = `<span class="term-cnt">${t.count}</span>`;
+    // 반복 문장: 본문 문장인지 선택지 버튼 라벨인지 표시 (둘 다 쓰이면 둘 다)
+    (t.kinds || []).forEach((k) => {
+      jp.innerHTML += k === "choice"
+        ? `<span class="term-kindbadge choice" title="이벤트 선택지 버튼 라벨로 쓰이는 텍스트">선택지</span>`
+        : `<span class="term-kindbadge" title="메시지 본문/설명 문장">문장</span>`;
+    });
     if (t.is_identifier) jp.innerHTML += `<span class="term-idbadge" title="식별자이기도 함 — 식별자 자체는 원문 유지, 자유 텍스트에서만 치환">식별자</span>`;
     jp.appendChild(document.createTextNode(t.jp));
     const inp = document.createElement("input");
@@ -650,7 +974,9 @@ function renderTermList(host, list, kind) {
       t.ko = inp.value;
       row.classList.toggle("done", !!t.ko);
       const res = await post("/api/term", { kind, jp: t.jp, ko: inp.value });
-      if (kind === "exact" && res.applied) toast(`${res.applied}곳 일괄 적용`);
+      if (res.applied) toast(kind === "exact"
+        ? `${res.applied}곳 일괄 적용`
+        : `부분 번역 ${res.applied}곳의 남은 원문 단어를 치환했어요`);
       if (res.stats) renderProgress(res.stats);
       if (STATE.curRel) openFile(STATE.curRel);
     };
@@ -754,7 +1080,7 @@ function hl(text, q) {
   try { return safe.replace(new RegExp("(" + escRe(esc(q)) + ")", "ig"), "<mark>$1</mark>"); }
   catch (e) { return safe; }
 }
-const SR_CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "제목", desc: "설명", sysname: "내부명", varvalue: "변수값" };
+const SR_CAT = { dialogue: "대사", narration: "나레이션", choice: "선택지", label: "카드 이름", desc: "카드 설명", scnname: "시나리오 제목", scndesc: "시나리오 설명", sysname: "내부명", varvalue: "변수값" };
 async function showSearch() {
   if (!STATE.open) return toast("먼저 시나리오를 여세요");
   $("#search").style.display = "flex";
@@ -832,9 +1158,33 @@ async function runOverflow() {
   const d = await api(`/api/dup_choices?scope=${encodeURIComponent(scope)}${rel}`);
   if (d.error) { dupBox.innerHTML = `<div class="empty">${esc(d.error)}</div>`; }
   else { renderDupChoices(d.results || []); }
+  const mf = await api("/api/mt_failed");
+  renderMtFailed(mf.results || []);
   const r = await api(`/api/overflow?scope=${encodeURIComponent(scope)}${rel}`);
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   renderOverflowResults(r.results || []);
+}
+function renderMtFailed(list) {
+  const box = $("#mtFailResults");
+  if (!box) return;
+  box.innerHTML = "";
+  box.classList.toggle("is-empty", !list.length);
+  const head = document.createElement("div");
+  head.className = "search-count";
+  head.textContent = list.length
+    ? `${list.length}건 — 변수/코드 복원 실패로 빈 칸 (클릭 → 그 문장으로 이동)`
+    : "자동번역 복원 실패로 남은 문장이 없습니다 👍";
+  box.appendChild(head);
+  list.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "sr-row";
+    const file = m.rel.split(/[\/]/).pop();
+    const cat = m.cat ? `<span class="badge cat-${m.cat}">${SR_CAT[m.cat] || m.cat}</span>` : "";
+    row.innerHTML = `<div class="sr-meta"><span class="sr-file" title="${esc(m.rel)}">${esc(file)}</span>${cat}</div>`
+      + `<div class="sr-ko">${esc(m.jp)}</div>`;
+    row.onclick = () => { closeOverflow(); jumpTo(m.rel, m.sid); };
+    box.appendChild(row);
+  });
 }
 function renderDupChoices(list) {
   const box = $("#dupResults");
@@ -1013,6 +1363,14 @@ async function runDeeplDraft(scope) {
   $("#deeplResult").textContent =
     `완료: ${x.translated}개 초안 생성 (고유 ${x.unique}문장 · ${x.chars.toLocaleString()}자 전송)` +
     (x.skipped ? ` · 복원 실패 ${x.skipped}문장은 빈 칸 (DeepL 초안으로 채우세요)` : "");
+  if (x.skipped && r.failed && r.failed.length) {
+    // 복원 실패 문장을 바로 확인할 수 있게 첫 실패 문장으로 이동 (전체 목록은 ⚠ 경고 패널)
+    setTimeout(() => {
+      closeDeepl();
+      toast(`복원 실패 ${r.failed.length}문장 — 첫 문장으로 이동 (전체는 ⚠ 경고 패널)`);
+      jumpTo(r.failed[0].rel, r.failed[0].sid);
+    }, 1200);
+  }
   renderProgress(r.stats);
   loadDeeplUsage();
   if (curEngine() === "azure") loadAzureUsage();
@@ -1038,12 +1396,18 @@ async function showFlow() {
   try {
     const { svg } = await mermaid.render("flowSvg", r.mermaid);
     host.innerHTML = svg;
-    // 노드 클릭 → 해당 파일 편집
+    // 노드 클릭 → 파일 편집 / ✏ 이름 번역 모드면 툴 전용 표시명 입력
     Object.entries(r.id2rel).forEach(([nid, rel]) => {
       const el = host.querySelector(`[id^="flowchart-${nid}-"]`) || host.querySelector(`#${nid}`);
       if (el) {
         el.style.cursor = "pointer";
-        el.addEventListener("click", () => { $("#flow").style.display = "none"; openFile(rel); });
+        el.addEventListener("click", () => {
+          if ($("#flowEdit").checked) {
+            openFlowNameBar((r.id2name || {})[nid] || "", (r.id2tool || {})[nid] || "");
+          } else {
+            $("#flow").style.display = "none"; openFile(rel);
+          }
+        });
       }
     });
   } catch (e) {
@@ -1051,6 +1415,37 @@ async function showFlow() {
   }
 }
 function closeFlow() { $("#flow").style.display = "none"; }
+
+// ── 툴 전용 이름 번역 (흐름 노드 라벨 — export 에 안 들어감) ──
+let flowNameTarget = "";
+let flowNamePrefill = "";
+function openFlowNameBar(orig, curTool) {
+  if (!orig) return;
+  flowNameTarget = orig;
+  flowNamePrefill = curTool || orig;
+  $("#flowNameOrig").textContent = orig;
+  // 현재 표시명(있으면) 또는 원문을 미리 채워, 일부만 고쳐 쓸 수 있게
+  // (예: 02会話　⑥VS2 → 한자만 고쳐 02대화　⑥VS2)
+  $("#flowNameKo").value = flowNamePrefill;
+  $("#flowNameBar").style.display = "flex";
+  $("#flowNameKo").focus();
+  $("#flowNameKo").select();
+}
+async function saveFlowName() {
+  if (!flowNameTarget) return;
+  const target = flowNameTarget;
+  flowNameTarget = "";                    // blur+버튼/Enter 중복 저장 방지
+  const v = $("#flowNameKo").value.trim();
+  if (v === flowNamePrefill) {            // 변경 없음 → 저장 없이 닫기
+    $("#flowNameBar").style.display = "none";
+    return;
+  }
+  const r = await post("/api/tool_name", { name: target, ko: v });
+  if (r.error) return toast(r.error);
+  $("#flowNameBar").style.display = "none";
+  toast("표시 이름 저장 (툴에서만 보임)");
+  showFlow();   // 새 라벨로 다시 그림
+}
 
 async function doExport() {
   let def;
@@ -1143,6 +1538,10 @@ $("#termAddJp").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#
 $("#terms").addEventListener("click", (e) => { if (e.target.id === "terms") closeTerms(); });
 $("#flowClose").onclick = closeFlow;
 $("#flowAll").onchange = showFlow;
+$("#flowEdit").onchange = () => { if (!$("#flowEdit").checked) $("#flowNameBar").style.display = "none"; };
+$("#flowNameSave").onclick = saveFlowName;
+$("#flowNameKo").onkeydown = (e) => { if (e.key === "Enter") saveFlowName(); };
+$("#flowNameKo").onblur = saveFlowName;   // 포커스 아웃 = 자동 저장
 $("#flow").addEventListener("click", (e) => { if (e.target.id === "flow") closeFlow(); });
 $("#viewList").onclick = () => setView("list");
 $("#viewFlow").onclick = () => setView("flow");

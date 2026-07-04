@@ -82,6 +82,32 @@ input[type=text] {
 .ol-end { color: #6b7280; font-style: italic; }
 .ol-jump { cursor: pointer; }
 .ol-jump:hover { filter: brightness(0.96); text-decoration: underline; }
+/* 툴 전용 표시명 편집 (흐름 보기 이름 줄) */
+.ol-edit {
+  padding: 0 6px; font-size: 11px; border: 1px solid #e5e7eb; border-radius: 4px;
+  background: #fff; color: #9ca3af; cursor: pointer; visibility: hidden;
+}
+.ol-mark:hover .ol-edit { visibility: visible; }
+.ol-edit:hover { color: #2563eb; border-color: #bfdbfe; }
+.ol-editbox { font-size: 12px; padding: 2px 6px; min-width: 180px; }
+/* 흐름 보기 호출원·다음 순서 배너 */
+.ol-navbar {
+  display: flex; align-items: center; gap: 14px; padding: 8px 12px;
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px;
+  font-size: 12.5px; color: #1d4ed8;
+}
+.ol-navlink { cursor: pointer; font-weight: 600; }
+.ol-navlink:hover { text-decoration: underline; }
+.ol-navnext { margin-left: auto; }
+.ol-navend { margin-left: auto; color: #9ca3af; }
+/* 흐름 보기 모드 전환 바 */
+.ol-modebar {
+  padding: 6px 12px; font-size: 12.5px; color: #6b7280;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+}
+.ol-modebar label { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+/* 일렬 모드에서 펼쳐진 호출 줄 = 구간 머리 */
+.ol-inlined { font-weight: 700; }
 .units { display: flex; flex-direction: column; gap: 10px; }
 .unit {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px; background: #fff;
@@ -99,10 +125,18 @@ input[type=text] {
 .unit .badge.ent { background: rgba(43,99,255,0.08); color: #2563eb; }
 .unit .badge.spk { background: rgba(43,99,255,0.08); color: #2563eb; font-weight: 600; }
 .unit .badge.cond { background: #ecfdf5; color: #047857; font-weight: 600; }
+.unit .badge.dup { background: #fff7ed; color: #c2410c; font-weight: 600; cursor: pointer; }
+.unit .badge.dup:hover { background: #ffedd5; }
+.unit .badge.partial { background: #fef9c3; color: #a16207; font-weight: 700; }
+.dup-where { margin: 4px 0 6px; font-size: 12px; border: 1px solid #fed7aa; border-radius: 6px; background: #fffbf5; }
+.dup-where-row { padding: 4px 10px; border-bottom: 1px solid #fef3e2; cursor: pointer; color: #374151; }
+.dup-where-row:last-child { border-bottom: none; }
+.dup-where-row:hover { background: #ffedd5; }
+.dup-where-row.me { color: #9ca3af; cursor: default; }
 .unit .badge.cat-dialogue { background: #dbeafe; color: #1d4ed8; font-weight: 700; }
 .unit .badge.cat-narration { background: #f3e8ff; color: #7c3aed; font-weight: 700; }
 .unit .badge.cat-choice { background: #fef3c7; color: #b45309; font-weight: 700; }
-.unit .badge.cat-label, .unit .badge.cat-desc { background: #f3f4f6; color: #6b7280; font-weight: 700; }
+.unit .badge.cat-label, .unit .badge.cat-desc, .unit .badge.cat-scnname, .unit .badge.cat-scndesc { background: #f3f4f6; color: #6b7280; font-weight: 700; }
 .unit .badge.cat-sysname { background: #f3f4f6; color: #9ca3af; font-weight: 700; }
 .unit .badge.cat-varvalue { background: #ccfbf1; color: #0f766e; font-weight: 700; }
 .unit .badge.varjump { background: #eff6ff; color: #2563eb; cursor: pointer; font-weight: 600; }
@@ -168,6 +202,8 @@ input[type=text] {
   border: 1px dashed #4b5563; border-radius: 3px; color: #6b7280; font-size: 15px;
 }
 .gp-line { min-height: 22px; }
+/* 스킨 글리프(#e 등) — 게임처럼 전각 1글자 폭, 픽셀아트 보존 */
+.gp-glyph { display: inline-block; width: 18px; height: 18px; vertical-align: -3px; image-rendering: pixelated; }
 .gp-over { opacity: 0.38; }                         /* 7줄 넘는 줄 = 게임에선 안 보임 */
 .gp-cut { position: relative; height: 0; margin: 3px 0; border-top: 1px dashed #e05555; }
 .gp-cut::after {
@@ -282,6 +318,12 @@ input[type=text] {
   font-size: 10px; background: rgba(43,99,255,0.08); color: #2563eb;
   border-radius: 4px; padding: 0 5px; margin: 0 4px; font-weight: 600;
 }
+.term-kindbadge {
+  font-size: 10px; background: #f3f4f6; color: #6b7280;
+  border-radius: 4px; padding: 0 5px; margin: 0 2px; font-weight: 600;
+  flex: none;
+}
+.term-kindbadge.choice { background: rgba(217,119,6,0.10); color: #b45309; }
 .term-occbtn, .term-del { padding: 3px 8px; font-size: 12px; }
 .term-del { color: #dc2626; border-color: #fecaca; }
 .term-occ { margin: 6px 0 4px 28px; border-left: 2px solid #e5e7eb; }
@@ -300,6 +342,14 @@ input[type=text] {
 /* 흐름 플로우차트 */
 .flow-box { width: 92vw; max-width: 1200px; height: 86vh; max-height: 86vh; }
 .flow-opt { margin-left: auto; margin-right: 14px; font-size: 12px; font-weight: 400; color: #6b7280; cursor: pointer; }
+.flow-opt + .flow-opt { margin-left: 0; }
+/* 흐름 패널 노드 이름 번역 입력줄 */
+.flow-namebar {
+  display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+  border-bottom: 1px solid #e5e7eb; background: #f9fafb; font-size: 13px;
+}
+.flow-namebar .fn-orig { font-weight: 600; color: #374151; }
+.flow-namebar input { flex: 0 1 260px; }
 .flowchart { overflow: auto; flex: 1; padding: 16px; background: #fbfcfe; }
 .flowchart .node { cursor: pointer; }
 .flowchart svg { max-width: none; }

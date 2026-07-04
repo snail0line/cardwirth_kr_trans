@@ -50,12 +50,12 @@ ENTITY_ATTR = {
     "gossip": ENT_GOSSIP,
     "scenario": ENT_SCENARIO,
     "keycode": ENT_KEYCODE,
-    "link": ENT_LINK,
 }
-# Link 타깃 앵커: <Start name="..."> 의 name 속성은 Link 엔티티 정의
-ENTITY_ATTR_BY_TAG = {
-    ("Start", "name"): ENT_LINK,
-}
+# Link(스타트 이름)는 완전 비노출 내부 라벨이라 번역 대상에서 제외(2026-07-04 사용자 결정
+# — 전 프로젝트 1,618개 중 번역된 것 0). 추출 자체를 안 하고 원문 그대로 유지한다.
+# <Start name>/<Link link>/<Call call> 이 자유 텍스트(@name)로 새지 않게 명시 스킵.
+LINK_SKIP_ATTRS = {("Start", "name"), ("Link", "link"), ("Call", "call"),
+                   ("Link", "call"), ("Call", "link")}
 
 # ── 자유 텍스트: 요소 텍스트(#text) ────────────────────────────────────────
 # 항상 자유 텍스트인 tag
@@ -168,10 +168,9 @@ def slot_for_attr(tag: str, attr: str, value: str) -> Optional[Slot]:
     a = attr.lower()
     if a in SKIP_ATTRS:
         return None
-    # 엔티티 앵커 (Start@name 등)
-    et = ENTITY_ATTR_BY_TAG.get((tag, attr))
-    if et:
-        return Slot(f"@{attr}", tag, None, "entity", et, value)
+    # Link(스타트 이름) 정의/참조 — 비노출 내부 라벨, 번역 대상 아님
+    if (tag, a) in LINK_SKIP_ATTRS or a == "link":
+        return None
     # 엔티티 참조 속성
     et = ENTITY_ATTR.get(a)
     if et:

@@ -132,12 +132,16 @@ def _call(key: str, region: str, texts: List[str]) -> List[str]:
     raise AzureError(f"재시도 실패: {last}")
 
 
-# 스팬 보호 대상: &X 색상코드만 (단어가 아니라 이름 치환이 불가능한 토큰).
-_PROTECT = re.compile(r"&[rgbywopld]", re.I)
+# 스팬 보호 대상: &X 색상코드 + #X 이모지 글리프(스킨 Font 이미지로 렌더링되는
+# 특수문자 — a b d e f g h j k l n o p q s w x z, 대소문자 무관. 치환코드
+# m/u/r/i/c/y/t 와 겹치지 않게 설계돼 있다). 단어가 아니므로 이름 치환 불가.
+_PROTECT = re.compile(r"&[rgbywopld]|#[abdefghjklnopqswxz0-9]", re.I)
 _TAG = re.compile(r"</?span[^>]*>")
+# 이모지 글리프 보존 검증용 (스팬 보호가 번역 중 유실되면 복원 실패로 처리)
+_EMOJI = re.compile(r"#[abdefghjklnopqswxz0-9]", re.I)
 
-# 이름 치환 대상: $...$ 변수 참조, %...% 상태 변수, #X 치환코드(캐릭터 이름 등).
-_NAMEPAT = re.compile(r"\$[^$\n]*\$|%[^%\n]*%|#[0-9A-Za-z]")
+# 이름 치환 대상: $...$ 변수 참조, %...% 상태 변수, #X 치환코드(멤버/화자/여관 등).
+_NAMEPAT = re.compile(r"\$[^$\n]*\$|%[^%\n]*%|#[MURICYTmuricyt]")
 # 인명 치환 풀: (일본어, 허용 한국어 음차). 일반명사와 안 겹치고(ユリ=백합 오번역 사례)
 # 음차 표기가 흔들리지 않는 이름만. 남녀 공용 이름 위주 — 여성형 이름(ミナ/エマ)을
 # 쓰면 영어 피벗이 없는 소유격을 "her→그녀"로 지어내는 편향이 생긴다.
@@ -155,8 +159,45 @@ _KIND_WORDS = {
 }
 
 
-def _mask_names(src: str) -> tuple:
-    """변수/치환코드 → 이름. 동일 토큰은 동일 이름. 반환 (치환문, [(일본어, 음차들, 원토큰, 개수)]).
+def mask_glossary(src: str, glossary: Dict[str, str], taken: Optional[set] = None) -> tuple:
+    """용어집 단어(원문→한국어)를 안정 음차 이름으로 마스킹. DeepL/Azure 공용.
+    반환 (치환문, [(이름, 음차들, 사용자 한국어 번역, 개수)]). 되치환은 _unmask_names.
+    문장형 용어(12자 초과·개행 포함)는 제외. 긴 용어부터 치환(부분 중복 대비)."""
+    taken = taken if taken is not None else set()
+    used = []
+    masked = src
+    for term in sorted(glossary, key=len, reverse=True):
+        ko = (glossary[term] or "").strip()
+        if not ko or len(term) > 12 or "\n" in term or term not in masked:
+            continue
+        got = None
+        for jp, kos in _NAMES:
+            if jp in src or jp in taken:
+                continue
+            got = (jp, kos)
+            break
+        if got is None:
+            break                               # 이름 풀 소진 — 남은 용어는 원문대로
+        taken.add(got[0])
+        n = masked.count(term)
+        masked = masked.replace(term, got[0])
+        used.append((got[0], got[1], ko, n))
+    return masked, used
+
+
+def unmask_glossary(dst: str, used) -> str:
+    """번역문의 음차 이름 → 사용자 한국어 번역 (best-effort — DeepL 경로용)."""
+    d, _ok = _unmask_names(dst, used)
+    return d
+
+
+def _mask_names(src: str, glossary: Optional[Dict[str, str]] = None) -> tuple:
+    """변수/치환코드/용어 → 이름. 동일 토큰은 동일 이름.
+    반환 (치환문, [(일본어, 음차들, 되치환값, 개수)]).
+
+    glossary(용어집: 원문→한국어)가 주어지면 그 단어도 이름으로 마스킹하고,
+    되치환 때 원문 토큰이 아니라 "사용자의 한국어 번역"을 넣는다
+    (예: リューン→ヒカル→번역→"륜"). 문장형 용어(12자 초과·개행 포함)는 제외.
 
     원문에 이미 등장하는 이름은 쓰지 않는다 — 진짜 그 이름의 캐릭터가 있는 문장이면
     되치환 때 캐릭터 이름까지 변수로 오염되기 때문. 치환·복원이 문장 단위라
@@ -176,6 +217,11 @@ def _mask_names(src: str) -> tuple:
             return jp, kos
         return None                             # 풀 소진 — 토큰 그대로 둠
 
+    masked = src
+    if glossary:
+        masked, used_g = mask_glossary(src, glossary, taken)
+        used.extend(used_g)
+
     def rep(m):
         tok = m.group()
         if tok not in seen:
@@ -187,8 +233,9 @@ def _mask_names(src: str) -> tuple:
         counts[tok] = counts.get(tok, 0) + 1
         return seen[tok]
 
-    masked = _NAMEPAT.sub(rep, src)
-    return masked, [(jp, kos, tok, counts.get(tok, 0)) for jp, kos, tok in used]
+    masked = _NAMEPAT.sub(rep, masked)
+    return masked, [e if len(e) == 4 else (e[0], e[1], e[2], counts.get(e[2], 0))
+                    for e in used]
 
 
 def _unmask_names(dst: str, used) -> tuple:
@@ -240,7 +287,7 @@ def _fix_line(src_line: str, dst_line: str) -> str:
 
 # 문장 종결로 취급하는 줄 끝 문자 — 이걸로 안 끝나는 줄은 다음 줄과 같은 문장이
 # 중간에서 줄바꿈된 것으로 보고 이어 붙여 번역한다("いくら/でも" 분단 방지).
-_SENT_END = tuple("。．！？…‼⁉」』】)）!?")
+_SENT_END = tuple("。．.！？…‼⁉」』】)）!?")
 # 빈 줄을 '건너서도' 문장이 이어진다고 볼 단서 — 조사/쉼표로 끝나면 명백한 문장 중간.
 # (더블 스페이싱 대응. 명사로 끝나는 줄은 목록 항목일 수 있어 빈 줄에서 끊는다.)
 _CONT_END = tuple("、，をはがのにへとでもや")
@@ -342,7 +389,8 @@ def _wrap(body: str, width: int, lead0: str, lead_cont: str) -> List[str]:
 
 def translate_texts(texts: List[str], key: Optional[str] = None, region: Optional[str] = None,
                     progress: Optional[Callable[[int, int], None]] = None,
-                    fallback: str = "skip") -> Dict[str, str]:
+                    fallback: str = "skip",
+                    glossary: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """텍스트 목록 JA→KO 번역. 중복 제거 후 한 번씩만 호출. 반환: {원문: 번역}.
 
     Azure 는 DeepL 의 preserve_formatting 같은 개행 보존 옵션이 없어, 여러 줄을 한 번에
@@ -372,7 +420,7 @@ def translate_texts(texts: List[str], key: Optional[str] = None, region: Optiona
                 if b.strip():
                     bodies.append(b)
     bodies = list(dict.fromkeys(bodies))
-    masked_bodies = {b: _mask_names(b) for b in bodies}     # 본문 → (이름 치환문, 이름들)
+    masked_bodies = {b: _mask_names(b, glossary) for b in bodies}     # 본문 → (이름 치환문, 이름들)
     send = [masked_bodies[b][0] for b in bodies]
     trans_raw: Dict[str, str] = {}
     for s in range(0, len(send), BATCH):
@@ -387,6 +435,10 @@ def translate_texts(texts: List[str], key: Optional[str] = None, region: Optiona
     for b in bodies:
         mb, used = masked_bodies[b]
         d, ok = _unmask_names(trans_raw.get(mb, mb), used)  # 음차된 이름 → 원 토큰
+        # 이모지 글리프(#e 등) 보존 검증 — 스팬 보호가 유실/증식되면 실패 처리
+        if sorted(t.lower() for t in _EMOJI.findall(b)) \
+                != sorted(t.lower() for t in _EMOJI.findall(d)):
+            ok = False
         trans[b] = (d, ok)
     out: Dict[str, str] = {}
     failed: List[str] = []
@@ -404,13 +456,30 @@ def translate_texts(texts: List[str], key: Optional[str] = None, region: Optiona
                 continue
             d, ok = trans.get(body, (body, True))
             ok_all = ok_all and ok
-            # 짝이 안 맞는 여는/닫는 괄호를 Azure 가 버리는 것을 grp 단위로 복원
-            for op, cl in (("「", "」"), ("『", "』"), ("（", "）")):
-                if body.startswith(op) and not d.startswith(op) and d.count(op) < body.count(op):
-                    d = op + d
-                if body.rstrip().endswith(cl) and not d.rstrip().endswith(cl) \
-                        and d.count(cl) < body.count(cl):
-                    d = d.rstrip() + cl
+            # 따옴표→괄호 환원을 grp(병합 문장) 범위에서 먼저 — Azure 가 「」 를
+            # 곧은따옴표로 바꾸는데, 문장 단위여야 짝 판정이 정확하다(전체 텍스트
+            # 단위로 하면 다른 문단의 따옴표와 짝지어져 「 유실/」 이중이 생긴다).
+            d = deepl._restore_quotes(body, d)
+            # 환원기가 지어낸 초과 괄호 제거 — 여는 「만 있는 문장(닫는 짝은 다른
+            # 문장에 있음)에 따옴표 쌍이 오면 」가 창작되므로, 원문 개수를 넘는
+            # 경계 괄호는 걷어낸다.
+            for br in "「」『』":
+                while d.count(br) > body.count(br):
+                    if d.rstrip().endswith(br):
+                        d = d.rstrip()[:-1]
+                    elif d.startswith(br):
+                        d = d[1:]
+                    else:
+                        break
+            # 남은 짝 안 맞는 괄호 복원. 따옴표가 아직 있으면(원문 자체에 따옴표가
+            # 있는 경우) 보류 — 이후 전체 _restore_quotes/_fix_line 에 맡긴다.
+            if not any(q in d for q in "“”‘’\"'"):
+                for op, cl in (("「", "」"), ("『", "』"), ("（", "）")):
+                    if body.startswith(op) and not d.startswith(op) and d.count(op) < body.count(op):
+                        d = op + d
+                    if body.rstrip().endswith(cl) and not d.rstrip().endswith(cl) \
+                            and d.count(cl) < body.count(cl):
+                        d = d.rstrip() + cl
             lead0 = _split_lead(g_lines[0])[0]
             if len(g_lines) == 1:                   # 한 줄 문장 — 레이아웃 유지
                 pieces.append(lead0 + d)
@@ -465,13 +534,32 @@ def draft_units(proj, rel: Optional[str] = None, overwrite: bool = False) -> Dic
     if not targets:
         return {"translated": 0, "chars": 0, "unique": 0, "skipped": 0}
     uniq_jp = list(dict.fromkeys(jp for _, jp in targets))
-    trans = translate_texts(uniq_jp)                        # fallback="skip"
+    # 용어집(번역이 입력된 단어)을 MT 에 강제 적용 — リューン→륜 같은 고정 표기
+    terms = {jp: ko for jp, ko in (proj.get("terms") or {}).items() if (ko or "").strip()}
+    trans = translate_texts(uniq_jp, glossary=terms or None)   # fallback="skip"
     n = 0
     for u, jp in targets:
         dst = trans.get(jp)
         if dst is None:
+            u["mt_failed"] = True                           # 복원 실패 — 경고 패널/점프 표적
             continue
         u["ko"] = textcodec.encode_field(u["field"], dst)   # 속성은 raw 저장(백슬래시 이중화 방지)
+        u.pop("mt_failed", None)
         n += 1
     return {"translated": n, "chars": sum(len(j) for j in uniq_jp),
             "unique": len(uniq_jp), "skipped": len(uniq_jp) - len(trans)}
+
+
+def failed_units(proj, cap: int = 200) -> list:
+    """복원 실패로 빈 칸으로 남은 유닛 목록(번역되면 자동 제외). 경고 패널/점프용."""
+    out = []
+    for rel, f in proj["files"].items():
+        for u in f["units"]:
+            if u["kind"] != "free" or not u.get("mt_failed") or u.get("ko"):
+                continue
+            jp = textcodec.decode_field(u["field"], u["jp"])
+            out.append({"rel": rel, "sid": u["id"], "cat": u.get("cat"),
+                        "jp": jp.replace("\n", " ").strip()[:100]})
+            if len(out) >= cap:
+                return out
+    return out

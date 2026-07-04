@@ -10,6 +10,15 @@ from . import xmlio, schema, context, flowcond
 # %상태변수% 표시 참조 (예: %02/食事済？%)
 _DISPVAR = re.compile(r"%([^%\n]+)%")
 
+# 가나(히라가나/가타카나/반각 가타카나) — 번역문에 남아 있으면 부분 번역
+_KANA = re.compile(r"[ぁ-ゖァ-ヺｦ-ﾝ]")
+
+
+def is_partial_ko(jp: str, ko: str) -> bool:
+    """ko 에 가나가 남아 있으면 부분 번역(용어 치환 초안 등) — 완료로 세지 않는다.
+    단 ko == jp(원문 그대로 완료 처리)는 의도적 유지로 보고 완료로 인정한다."""
+    return bool(ko) and ko != jp and bool(_KANA.search(ko))
+
 GSEP = "\x1f"  # glossary key 구분자
 
 
@@ -38,6 +47,22 @@ def _collect_display_vars(scenario_dir: str, rels) -> set:
     return names
 
 
+def _collect_cast_names(roots) -> set:
+    """시나리오의 CastCard 실명 집합 — 대사 첫 줄 이름표 판정은 이 이름과
+    정확히 일치할 때만 인정한다(자유 휴리스틱은 지문 첫 줄 오탐이 많아 폐지)."""
+    names = set()
+    for root in roots.values():
+        if root.tag == "CastCard":
+            nm = (root.findtext("Property/Name") or "").strip()
+            if nm:
+                names.add(nm)
+        for cc in root.iter("CastCard"):        # 에어리어/배틀에 임베드된 카드 포함
+            nm = (cc.findtext("Property/Name") or "").strip()
+            if nm:
+                names.add(nm)
+    return names
+
+
 def extract_project(scenario_dir: str) -> Dict[str, Any]:
     scenario_dir = os.path.abspath(scenario_dir)
     proj: Dict[str, Any] = {
@@ -48,10 +73,13 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
     glossary = proj["glossary"]
     rels = xmlio.find_xml_files(scenario_dir)
     display_vars = _collect_display_vars(scenario_dir, rels)
+    roots = {}
+    for rel in rels:
+        roots[rel] = xmlio.parse_file(os.path.join(scenario_dir, rel)).getroot()
+    cast_names = _collect_cast_names(roots)
 
     for rel in rels:
-        tree = xmlio.parse_file(os.path.join(scenario_dir, rel))
-        root = tree.getroot()
+        root = roots[rel]
         # 이벤트 흐름을 따라가 각 대사의 '도달 조건'(쿠폰 분기 등)을 정확히 계산
         fcond = flowcond.compute_file_conditions(root)
         units = []
@@ -90,7 +118,7 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
                 # 대사 컨텍스트: 화자 / 분기조건(파벌·플래그·스텝) / 말투
                 sp = ""
                 if slot.field == "#text" and slot.tag == "Text":
-                    sp = context.speaker_of(ancestors, el)
+                    sp = context.speaker_of(ancestors, el, cast_names)
                     if sp:
                         u["speaker"] = sp
                     info = fcond.get(id(el))
@@ -134,7 +162,8 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
                 elif slot.tag == "Text":
                     u["cat"] = "dialogue" if sp else "narration"
                 elif slot.tag == "Description":
-                    u["cat"] = "desc"
+                    root_tag = ancestors[0].tag if ancestors else ""
+                    u["cat"] = "scndesc" if root_tag == "Summary" else "desc"
                 elif (slot.tag, slot.parent) in schema.FREE_VALUE_TAGS:
                     u["cat"] = "varvalue"           # 플래그/스텝 표시값 (%상태변수% 로 표시)
                 elif slot.tag == "Name":
@@ -147,6 +176,9 @@ def extract_project(scenario_dir: str) -> Dict[str, Any]:
                     if parent_tag == "Property" and root_tag in ("Package", "Area", "Battle") \
                             and len(ancestors) == 2:
                         u["cat"] = "sysname"
+                    elif parent_tag == "Property" and root_tag == "Summary" \
+                            and len(ancestors) == 2:
+                        u["cat"] = "scnname"        # 시나리오 제목 (선택 화면에 표시)
                     else:
                         u["cat"] = "label"
                 else:
@@ -174,8 +206,9 @@ def project_stats(proj: Dict[str, Any]) -> Dict[str, int]:
         for u in f["units"]:
             if u["kind"] == "free":
                 free_total += 1
-                if u.get("ko"):
-                    free_done += 1
+                if u.get("ko") and (u.get("force_done")
+                                    or not is_partial_ko(u["jp"], u["ko"])):
+                    free_done += 1          # 가나 남은 부분 번역은 미완(명시 완료 제외)
     ent_total = len(proj["glossary"])
     ent_done = sum(1 for g in proj["glossary"].values() if g.get("ko"))
     return {

@@ -91,13 +91,59 @@ def _free_values(proj: Dict[str, Any]) -> List[str]:
 
 
 def _free_index(proj: Dict[str, Any]):
-    """[(rel, sid, disp)] — 위치 추적용 자유 텍스트 인덱스."""
+    """[(rel, sid, disp, field)] — 위치 추적용 자유 텍스트 인덱스.
+    field 는 "#text"(본문 문장) / "@name"(선택지 버튼 라벨) 구분용."""
     idx = []
     for rel, f in proj["files"].items():
         for u in f["units"]:
             if u["kind"] == "free" and not u.get("control"):
-                idx.append((rel, u["id"], textcodec.decode(u["jp"])))
+                idx.append((rel, u["id"], textcodec.decode(u["jp"]), u["field"]))
     return idx
+
+
+# 「」『』 안의 짧은 인용어 = 고유명사/아이템명 신호 (예: 「鬼杜若」（おにかきつばた）)
+_QUOTED_RE = re.compile(r"[「『]([^「」『』\n]{2,12})[」』]")
+# 인용어 후보 탈락 조건: 문장부호/공백(=문장), 제어코드(&R/#Y 등 색·특수 지시)
+_TERM_NOISE_RE = re.compile(r"[。！？!?、\s　]|&[A-Za-z]|#[0-9A-Za-z]")
+
+
+def _mine_quoted_terms(free_vals: List[str]) -> set:
+    """자유 텍스트에서 「」『』 인용 단어를 채굴해 word 후보로. 2회+ 등장만.
+    식별자·화자에 안 잡히는 본문 속 고유명사(鬼杜若 등)를 건지는 경로."""
+    cnt: Counter = Counter()
+    for v in free_vals:
+        for m in _QUOTED_RE.findall(_VAR_RE.sub("", v)):
+            if not _TERM_NOISE_RE.search(m):
+                cnt[m] += 1
+    return {t for t, c in cnt.items() if c >= 2}
+
+
+# 빈출어 채굴: 가타카나 연속 3자+ / 한자 연속 2자+ / 한자+호칭(さん·ちゃん·くん).
+# 목표 예시(2026-07-04 사용자 지정): 半熟·醤油·親父(한자), マヨラー·マヨネーズ(가타카나),
+# 娘さん(호칭). 様·殿은 貴様·同様 오탐이 나와 호칭 규칙에서 제외(親父 등 본체는 한자 규칙이 잡음).
+_KATA_RE = re.compile(r"[ァ-ヴー]{3,}")
+_KANJI_RE = re.compile(r"[一-龥]{2,}")
+_HONOR_RE = re.compile(r"[一-龥]{1,4}(?:さん|ちゃん|くん)")
+_MINE_CAP = 200          # 대형 시나리오에서 후보 폭주 방지 (빈도순 상위만)
+
+
+def _mine_frequent_terms(free_vals: List[str], min_units: int = 3) -> set:
+    """여러 유닛에 반복 등장하는 연속어를 단어 후보로 채굴.
+    같은 유닛 안 중복은 1로 세고(유닛 수 기준), 가타카나·한자 연속어는
+    min_units 유닛+, 호칭 붙은 인물어는 2유닛+ 면 후보. 일반어/고유명사는
+    기계적으로 구분하지 않는다 — 빈도순 정렬로 노출하고 선택은 사용자 몫."""
+    cnt: Counter = Counter()
+    honor: set = set()
+    for v in free_vals:
+        v2 = _VAR_RE.sub("", v)
+        hon = set(_HONOR_RE.findall(v2))
+        honor |= hon
+        for m in set(_KATA_RE.findall(v2)) | set(_KANJI_RE.findall(v2)) | hon:
+            cnt[m] += 1
+    picked = [(t, c) for t, c in cnt.items()
+              if c >= (2 if t in honor else min_units)]
+    picked.sort(key=lambda x: -x[1])
+    return {t for t, _c in picked[:_MINE_CAP]}
 
 
 def _identifier_names(proj: Dict[str, Any]) -> set:
@@ -114,7 +160,7 @@ def _occurrences(index, jp: str, exact: bool, cap: int = 80):
     """용어가 등장하는 자유 텍스트 위치 목록 [{rel, sid, preview}]."""
     jp_s = jp.strip()
     out = []
-    for rel, sid, disp in index:
+    for rel, sid, disp, _field in index:
         hit = (disp.strip() == jp_s) if exact else (jp in disp)
         if hit:
             prev = disp.replace("\n", " ").strip()
@@ -141,9 +187,21 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
         }
 
     # ── exact: 동일 자유텍스트 값 2회+ ──
+    # 값별로 어디에 쓰였는지(#text=본문 문장 / @name=선택지 버튼 라벨) 집계해
+    # UI 가 "문장/선택지" 라벨을 달 수 있게 한다. 둘 다면 둘 다 담긴다.
+    field_kinds: Dict[str, set] = {}
+    for _rel, _sid, disp, field in index:
+        v = disp.strip()
+        if v:
+            field_kinds.setdefault(v, set()).add(
+                "choice" if field.startswith("@") else "text")
     cnt = Counter(v.strip() for v in free_vals if v.strip())
-    exact = [entry(v, c, True) for v, c in cnt.most_common()
-             if c >= 2 and len(v) <= 30 and not _is_variable_ref(v)]
+    exact = []
+    for v, c in cnt.most_common():
+        if c >= 2 and len(v) <= 30 and not _is_variable_ref(v):
+            e = entry(v, c, True)
+            e["kinds"] = sorted(field_kinds.get(v, set()))
+            exact.append(e)
 
     # ── word: 식별자/캐릭터 이름 중 자유텍스트에 등장 (구조적 내부식별자는 제외) ──
     cand = set()
@@ -156,8 +214,15 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
             sp = (u.get("speaker") or "").strip()
             if len(sp) >= 2 and sp not in _SYNTHETIC_SPEAKERS \
                     and not sp.endswith("PC") and not _is_structural_id(sp) \
-                    and not _is_system_name(sp):
-                cand.add(sp)
+                    and not _is_system_name(sp) \
+                    and not any(c in sp for c in " 　\t"):
+                cand.add(sp)     # 공백 포함 = 이름이 아니라 문장(화자 오탐 방어)
+    # 본문 속 「」『』 인용어 — 식별자/화자 어디에도 없는 고유명사를 채굴
+    for t in _mine_quoted_terms(free_vals):
+        if not _is_structural_id(t) and not _is_system_name(t):
+            cand.add(t)
+    # 본문 빈출어(가타카나·한자 연속어·호칭 인물어) — 半熟/醤油/娘さん 류
+    cand |= _mine_frequent_terms(free_vals)
     # 실제 '표시 텍스트'에 등장하는 것만 용어로 센다(같은 문자열이 표시 텍스트면 남긴다):
     #  · 변수 참조($..$ / %..%) 내부는 제외 — 토큰 안 substring(二人称 등)이 용어로 잡히는 것 방지
     #  · 그 후에도 백슬래시가 남는 값(パッケージ\… 같은 시스템 경로)은 표시 텍스트가 아니므로 제외
@@ -210,20 +275,51 @@ def remove_manual(proj: Dict[str, Any], jp: str) -> None:
 
 
 def apply_exact(proj: Dict[str, Any], jp: str, ko: str) -> int:
-    """exact 용어: 동일 자유텍스트 값 전부에 ko 를 일괄 적용. 적용 건수 반환."""
+    """exact 용어: 동일 자유텍스트 값 전부에 ko 를 일괄 적용. 적용 건수 반환.
+    완성된 번역(가나 없음 또는 명시 완료)은 덮어쓰지 않는다 — 빈칸·부분 번역만."""
+    from . import extract
     proj.setdefault("terms", {})[jp] = ko
     n = 0
     for f in proj["files"].values():
         for u in f["units"]:
-            if u["kind"] == "free" and textcodec.decode_field(u["field"], u["jp"]).strip() == jp.strip():
-                # #text 만 이스케이프, 속성(@name)은 raw
-                u["ko"] = textcodec.encode_field(u["field"], ko)
-                n += 1
+            if u["kind"] != "free" \
+                    or textcodec.decode_field(u["field"], u["jp"]).strip() != jp.strip():
+                continue
+            cur = textcodec.decode_field(u["field"], u.get("ko", ""))
+            if cur and (u.get("force_done")
+                        or not extract.is_partial_ko(
+                            textcodec.decode_field(u["field"], u["jp"]), cur)):
+                continue                    # 완료 번역 보존
+            # #text 만 이스케이프, 속성(@name)은 raw
+            u["ko"] = textcodec.encode_field(u["field"], ko)
+            n += 1
     return n
 
 
 def set_word(proj: Dict[str, Any], jp: str, ko: str) -> None:
     proj.setdefault("terms", {})[jp] = ko
+
+
+def apply_word_to_existing(proj: Dict[str, Any], jp: str, ko: str) -> int:
+    """단어 용어의 번역 입력 시, 번역칸(ko)에 "아직 남아 있는 원문 단어"를 즉시 치환.
+
+    대상 = ko 가 있고 그 안에 jp 단어가 그대로 남은 유닛(🈁 부분 번역의 잔재).
+    완성된 한국어 번역에는 원문 단어가 남아 있지 않으므로 자연히 건드리지 않고,
+    명시 완료(force_done)·읽기전용(control)은 보호한다. 빈칸은 초안 생성 몫."""
+    jp = (jp or "").strip()
+    ko = (ko or "").strip()
+    if not jp or not ko:
+        return 0
+    n = 0
+    for f in proj["files"].values():
+        for u in f["units"]:
+            if u["kind"] != "free" or u.get("control") or u.get("force_done"):
+                continue
+            cur = textcodec.decode_field(u["field"], u.get("ko", ""))
+            if cur and jp in cur:
+                u["ko"] = textcodec.encode_field(u["field"], cur.replace(jp, ko))
+                n += 1
+    return n
 
 
 def apply_words_to_drafts(proj: Dict[str, Any], only_untranslated: bool = True) -> int:

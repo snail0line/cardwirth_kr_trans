@@ -231,20 +231,39 @@ def _restore_indent(src: str, dst: str) -> str:
 
 
 def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "auto",
-                    progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, str]:
-    """텍스트 목록 JA→KO 번역. 중복 제거 후 한 번씩만 호출. 반환: {원문: 번역}."""
+                    progress: Optional[Callable[[int, int], None]] = None,
+                    glossary: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """텍스트 목록 JA→KO 번역. 중복 제거 후 한 번씩만 호출. 반환: {원문: 번역}.
+
+    glossary(용어집: 원문→한국어)가 주어지면 그 단어를 안정 음차 이름으로 마스킹해
+    보내고 번역 후 사용자의 한국어 번역으로 되치환한다(리ューン→륜 강제).
+    DeepL 공식 glossary API 는 일→한 미지원이라 이 방식(azure_mt 공용 로직)을 쓴다.
+    되치환 실패 시에도 번역 결과는 그대로 쓴다(best-effort — 검수에서 확인)."""
     key = key or load_key()
     if not key:
         raise DeepLError("DeepL 키가 없습니다.")
     url = endpoint(key, force)
     uniq = list(dict.fromkeys(t for t in texts if t and t.strip()))
+    gmap: Dict[str, tuple] = {}
+    send = uniq
+    if glossary:
+        from . import azure_mt                       # 함수 내 임포트 (순환 방지)
+        send = []
+        for t in uniq:
+            m, used = azure_mt.mask_glossary(t, glossary)
+            gmap[t] = used
+            send.append(m)
     out: Dict[str, str] = {}
     for s in range(0, len(uniq), BATCH):
-        chunk = uniq[s: s + BATCH]
+        chunk_src = uniq[s: s + BATCH]
+        chunk = send[s: s + BATCH]
         res = _call(url, key, chunk)
         if len(res) != len(chunk):
             raise DeepLError(f"응답 개수 불일치: 요청 {len(chunk)} vs 응답 {len(res)}")
-        for src, dst in zip(chunk, res):
+        for src, dst in zip(chunk_src, res):
+            if glossary and gmap.get(src):
+                from . import azure_mt
+                dst = azure_mt.unmask_glossary(dst, gmap[src])   # 음차 → 사용자 번역
             dst = _restore_quotes(src, dst)         # 원문에 없는 '' "" 억제 / 「」『』 복원
             dst = _restore_indent(src, dst)         # 줄머리 전각공백 들여쓰기 복원
             dst = _restore_vars(src, dst)           # $...$ 변수 참조 원문 복원
@@ -279,7 +298,10 @@ def usage(key: Optional[str] = None, force: str = "auto") -> Dict[str, int]:
 def _collect_targets(proj: Dict[str, Any], rel: Optional[str] = None,
                      overwrite: bool = False) -> List[tuple]:
     """DeepL 번역 대상 유닛 수집 → [(unit, jp_decoded)].
-    자유 텍스트만(제어기호·내부명 제외), rel 지정 시 그 파일만, overwrite=False 면 빈 ko 만."""
+    자유 텍스트만(제어기호·내부명 제외), rel 지정 시 그 파일만.
+    overwrite=False 면 빈 ko + "부분 번역"(가나 잔존 — 용어 치환 초안 등)을 대상으로
+    한다. 완성된 번역과 '원문 그대로 완료'(ko==jp)만 보존한다."""
+    from . import extract                   # 함수 내 임포트 (모듈 순환 방지)
     targets = []
     for r, fd in proj["files"].items():
         if rel and r != rel:
@@ -294,8 +316,8 @@ def _collect_targets(proj: Dict[str, Any], rel: Optional[str] = None,
             if not jp.strip():
                 continue
             ko = textcodec.decode_field(u["field"], u.get("ko", ""))
-            if ko and not overwrite:
-                continue
+            if ko and not overwrite                     and (u.get("force_done") or not extract.is_partial_ko(jp, ko)):
+                continue    # 명시 완료(force_done)도 보존
             targets.append((u, jp))
     return targets
 
@@ -323,7 +345,9 @@ def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
     if not targets:
         return {"translated": 0, "chars": 0, "unique": 0}
     uniq_jp = list(dict.fromkeys(jp for _, jp in targets))
-    trans = translate_texts(uniq_jp, force=force)
+    # 용어집(번역이 입력된 단어)을 초안에 강제 적용 — リューン→륜 같은 고정 표기
+    terms = {jp: ko for jp, ko in (proj.get("terms") or {}).items() if (ko or "").strip()}
+    trans = translate_texts(uniq_jp, force=force, glossary=terms or None)
     n = 0
     for u, jp in targets:
         dst = trans.get(jp)

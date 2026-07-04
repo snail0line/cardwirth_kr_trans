@@ -24,6 +24,52 @@ _TARGET_WHO = {"Random": "파티 중 누군가", "Selected": "선택 PC",
                "Unselected": "비선택 PC", "Valued": "지정 PC", "Party": "파티 전원"}
 
 
+class NameDisplay:
+    """흐름 보기/흐름 패널의 이름 라벨 번역 표시 (툴 안에서만 — export 무관).
+
+    우선순위: ①정식 번역(식별자 glossary ko / 씬 Name 유닛 ko — export 에도 반영되는 것)
+             ②proj["tool_names"] 의 툴 전용 표시명
+             ③용어집(terms) 번역 — ＿접두사 뗀 이름이 단어 용어로 번역돼 있으면 사용
+               (예: 단어 사전에서 マヨネーズ派→마요네즈파 → ＿マヨネーズ派 쿠폰 라벨에 적용)
+             ④원문."""
+
+    def __init__(self, proj):
+        self.tool = (proj or {}).get("tool_names", {}) or {}
+        self.terms = {k.strip(): v for k, v in ((proj or {}).get("terms") or {}).items() if v}
+        self.gl = {}      # (etype, jp) -> ko
+        self.scene = {}   # rel -> 번역된 씬(Area/Package/Battle) 이름
+        if not proj:
+            return
+        for g in proj.get("glossary", {}).values():
+            if g.get("ko"):
+                self.gl[(g["etype"], (g["jp"] or "").strip())] = g["ko"]
+        for rel, f in proj.get("files", {}).items():
+            for u in f["units"]:
+                if u["kind"] == "free" and u["tag"] == "Name" \
+                        and u.get("parent") == "Property" and u.get("ko"):
+                    ko = textcodec.decode_field(u["field"], u["ko"]).strip()
+                    if ko:
+                        self.scene[rel] = ko
+                    break
+
+    def name(self, raw, etype=None) -> str:
+        raw_s = (raw or "").strip()
+        if etype and (etype, raw_s) in self.gl:
+            return self.gl[(etype, raw_s)]
+        if raw_s in self.tool:
+            return self.tool[raw_s]
+        c = _clean(raw_s)      # ＿접두사·「」 뗀 이름으로 용어집(단어) 번역 조회
+        if c in self.terms:
+            return self.terms[c]
+        return raw_s
+
+    def scene_name(self, rel, raw) -> str:
+        if rel and rel in self.scene:
+            return self.scene[rel]
+        raw_s = (raw or "").strip()
+        return self.tool.get(raw_s) or self.terms.get(raw_s) or (raw or "")
+
+
 def _clean(s: str) -> str:
     s = (s or "").strip().strip("\\n").strip()
     if s.startswith("＿"):
@@ -40,42 +86,57 @@ def _talk_preview(card: ET.Element) -> str:
     return ""
 
 
-def _describe(card: ET.Element, resolve: Dict) -> dict:
-    """카드 → {kind, desc, target_rel?, target_name?}. resolve: (종류,id)->(rel,name)."""
+def _describe(card: ET.Element, resolve: Dict, nd: NameDisplay) -> dict:
+    """카드 → {kind, desc, target_rel?, name?}. resolve: (종류,id)->(rel,name).
+    이름이 붙는 줄엔 name(원문)을 함께 실어 프런트가 툴 전용 표시명을 편집하게 한다.
+    desc 의 이름 부분은 nd 로 번역 표시(툴 안에서만 — export 무관)."""
     tag = card.tag
     t = card.get("type")
     if tag == "Start":
-        return {"kind": "start", "desc": card.get("name", "") or "(시작)"}
+        raw = card.get("name", "")
+        return {"kind": "start", "desc": nd.name(raw) or "(시작)", "name": raw}
     if tag in ("Talk", "Talk2"):
         return {"kind": "talk", "desc": ""}
     if tag == "Branch":
         if t == "Coupon":
             who = _TARGET_WHO.get(card.get("targets", ""), "")
-            coup = _clean(card.get("coupon", ""))
-            return {"kind": "branch",
+            raw = card.get("coupon", "")
+            coup = _clean(nd.name(raw, "Coupon"))
+            return {"kind": "branch", "name": raw,
                     "desc": f"「{coup}」 칭호 분기" + (f" ({who})" if who else "")}
         if t == "Flag":
-            return {"kind": "branch", "desc": f"플래그 「{card.get('flag','')}」 분기"}
+            raw = card.get("flag", "")
+            return {"kind": "branch", "name": raw,
+                    "desc": f"플래그 「{nd.name(raw, 'Flag')}」 분기"}
         if t in ("Step", "MultiStep"):
-            return {"kind": "branch", "desc": f"스텝 「{card.get('step','')}」 분기"}
+            raw = card.get("step", "")
+            return {"kind": "branch", "name": raw,
+                    "desc": f"스텝 「{nd.name(raw, 'Step')}」 분기"}
         return {"kind": "branch", "desc": f"{t or ''} 분기"}
     if tag == "Call":
         if t == "Package":
             rel, name = resolve.get(("Package", (card.get("call") or "").strip()), (None, card.get("call")))
-            return {"kind": "call", "desc": f"패키지 「{name}」 호출", "target_rel": rel}
+            return {"kind": "call", "name": name,
+                    "desc": f"패키지 「{nd.scene_name(rel, name)}」 호출", "target_rel": rel}
         if t == "Start":
-            return {"kind": "call", "desc": f"스타트 「{card.get('call','')}」 호출(복귀)"}
+            raw = card.get("call", "")
+            return {"kind": "call", "name": raw,
+                    "desc": f"스타트 「{nd.name(raw)}」 호출(복귀)"}
         return {"kind": "call", "desc": "호출"}
     if tag == "Link":
         if t == "Package":
             rel, name = resolve.get(("Package", (card.get("link") or "").strip()), (None, card.get("link")))
-            return {"kind": "link", "desc": f"패키지 「{name}」로 이동", "target_rel": rel}
+            return {"kind": "link", "name": name,
+                    "desc": f"패키지 「{nd.scene_name(rel, name)}」로 이동", "target_rel": rel}
         if t == "Start":
-            return {"kind": "link", "desc": f"스타트 「{card.get('link','')}」로 점프(파일 내)"}
+            raw = card.get("link", "")
+            return {"kind": "link", "name": raw,
+                    "desc": f"스타트 「{nd.name(raw)}」로 점프(파일 내)"}
         return {"kind": "link", "desc": "이동"}
     if tag == "Change" and t == "Area":
         rel, name = resolve.get(("Area", (card.get("id") or "").strip()), (None, card.get("id")))
-        return {"kind": "change", "desc": f"에리어 「{name}」로 이동", "target_rel": rel}
+        return {"kind": "change", "name": name,
+                "desc": f"에리어 「{nd.scene_name(rel, name)}」로 이동", "target_rel": rel}
     if tag == "End":
         return {"kind": "end", "desc": "이벤트 종료"}
     if tag in ("PlayBgm",) or (tag == "Effect" and t in ("PlayBgm", "Bgm")):
@@ -89,9 +150,14 @@ def _describe(card: ET.Element, resolve: Dict) -> dict:
     return {"kind": "misc", "desc": tag}
 
 
-def build_outline(root: ET.Element, resolve: Dict[tuple, tuple]) -> List[dict]:
+def build_outline(root: ET.Element, resolve: Dict[tuple, tuple],
+                  nd: NameDisplay | None = None,
+                  content_rels: set | None = None) -> List[dict]:
     """파일 루트 → 카드 줄 목록(진행/트리 순서, depth 포함).
-    대사 줄엔 unit_ids(번역 유닛 sid) 부여."""
+    대사 줄엔 unit_ids(번역 유닛 sid) 부여. nd = 이름 라벨 번역 표시(없으면 원문).
+    content_rels 를 주면 번역할 게 없는 로직 전용 파일로의 호출/이동 줄은 숨긴다."""
+    if nd is None:
+        nd = NameDisplay(None)
     # Text요소 → 유닛 sid 매핑(번역칸 연결용)
     text_sid: Dict[int, int] = {}
     for sid, el, _anc, slot in xmlio.iter_slots(root):
@@ -107,15 +173,26 @@ def build_outline(root: ET.Element, resolve: Dict[tuple, tuple]) -> List[dict]:
                 continue
             if child.tag not in _CARD_TAGS:
                 continue
-            entry = _describe(child, resolve)
+            entry = _describe(child, resolve, nd)
             entry["depth"] = depth
+            if entry.get("name"):
+                # 편집칸 프리필용 — 현재 툴 전용 표시명(없으면 프런트가 원문 사용)
+                entry["tool_ko"] = nd.tool.get(entry["name"].strip(), "")
             if entry["kind"] == "talk":
                 sids = [text_sid[id(t)] for t in child.iter("Text") if id(t) in text_sid]
                 entry["unit_ids"] = sids
                 entry["preview"] = _talk_preview(child)
                 if not sids:
                     continue  # 번역할 텍스트 없는 Talk 은 생략
-            out.append(entry)
+            # 로직 전용 파일(번역 유닛 없음 — SYSTEM_… 패키지 등)로의 호출/이동은
+            # 번역할 게 없으므로 줄 자체를 숨긴다 (하위 콘텐츠는 계속 따라간다)
+            logic_only = (content_rels is not None
+                          and entry.get("target_rel")
+                          and entry["target_rel"] not in content_rels)
+            if entry["kind"] != "misc" and not logic_only:
+                # misc(BGM/효과음/대기/플래그 설정/Get·Lose 등)는 번역 문맥에 무의미한
+                # 로직 잡동사니라 표시하지 않는다. 하위 콘텐츠는 계속 따라간다.
+                out.append(entry)
             cont = child.find("Contents")
             if cont is not None:
                 walk(cont, depth + 1)
