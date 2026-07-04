@@ -12,6 +12,12 @@ _export_test/
 tools/convert_classic.py
 tools/convert_classic.bat
 
+# 개인용 일괄 번역 툴 (배포 안 함)
+tools/batch_translate.py
+tools/batch_translate.bat
+tools/convert_translate.py
+tools/convert_translate.bat
+
 # 제3자 시나리오(저작권) — 배포물에 포함하지 않음
 test_scenario/
 

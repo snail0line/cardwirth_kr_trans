@@ -91,13 +91,14 @@ def _free_values(proj: Dict[str, Any]) -> List[str]:
 
 
 def _free_index(proj: Dict[str, Any]):
-    """[(rel, sid, disp, field)] — 위치 추적용 자유 텍스트 인덱스.
-    field 는 "#text"(본문 문장) / "@name"(선택지 버튼 라벨) 구분용."""
+    """[(rel, sid, disp, field, ko)] — 위치 추적용 자유 텍스트 인덱스.
+    field 는 "#text"(본문 문장) / "@name"(선택지 버튼 라벨) 구분용. ko = 번역문(표시형)."""
     idx = []
     for rel, f in proj["files"].items():
         for u in f["units"]:
             if u["kind"] == "free" and not u.get("control"):
-                idx.append((rel, u["id"], textcodec.decode(u["jp"]), u["field"]))
+                idx.append((rel, u["id"], textcodec.decode(u["jp"]), u["field"],
+                            textcodec.decode_field(u["field"], u.get("ko", ""))))
     return idx
 
 
@@ -160,11 +161,12 @@ def _occurrences(index, jp: str, exact: bool, cap: int = 80):
     """용어가 등장하는 자유 텍스트 위치 목록 [{rel, sid, preview}]."""
     jp_s = jp.strip()
     out = []
-    for rel, sid, disp, _field in index:
+    for rel, sid, disp, _field, ko in index:
         hit = (disp.strip() == jp_s) if exact else (jp in disp)
         if hit:
             prev = disp.replace("\n", " ").strip()
-            out.append({"rel": rel, "sid": sid, "preview": prev[:60]})
+            out.append({"rel": rel, "sid": sid, "preview": prev[:60],
+                        "ko": ko.replace("\n", " ").strip()[:100]})
             if len(out) >= cap:
                 break
     return out
@@ -190,7 +192,7 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
     # 값별로 어디에 쓰였는지(#text=본문 문장 / @name=선택지 버튼 라벨) 집계해
     # UI 가 "문장/선택지" 라벨을 달 수 있게 한다. 둘 다면 둘 다 담긴다.
     field_kinds: Dict[str, set] = {}
-    for _rel, _sid, disp, field in index:
+    for _rel, _sid, disp, field, _ko in index:
         v = disp.strip()
         if v:
             field_kinds.setdefault(v, set()).add(

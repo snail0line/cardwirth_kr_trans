@@ -35,6 +35,7 @@ _ENDPOINT = ("https://api.cognitive.microsofttranslator.com/translate"
              "?api-version=3.0&from=ja&to=ko&textType=html")
 BATCH = 40          # Azure 한도는 요청당 1000건/5만자 — deepl.py 와 맞춰 40
 RETRY = 3
+RETRY_429 = 8       # 429(빈도 제한)는 분 단위 윈도라 길게 — Retry-After+지수 백오프
 LIMIT = 2_000_000   # F0 무료 티어 월 한도(자)
 
 # Azure 는 DeepL 처럼 사용량 조회 API 가 없다(포털 메트릭 또는 AD 인증 관리 API 뿐).
@@ -106,14 +107,36 @@ def usage() -> Dict[str, int]:
     return {"count": count, "limit": LIMIT, "remaining": max(0, LIMIT - count)}
 
 
+# ── F0 요청 빈도 자체 제한 (토큰 버킷) ──────────────────────────────────────
+# F0 는 시간당 200만 자를 "균등 분배" 강제(≈분당 33,300자). 일괄 번역처럼
+# 시나리오를 연달아 쏘면 429001 이 온다. 순간 버스트는 버킷 용량까지 허용하고,
+# 지속 속도는 분당 3만 자(보수적)로 스스로 제한한다.
+_BUCKET_CAP = 60_000        # 순간 허용량 (전형적 시나리오 1개 분량)
+_REFILL_PER_S = 500         # 초당 회복량 = 분당 30,000자
+_bucket = [float(_BUCKET_CAP), 0.0]     # [잔량, 마지막 갱신 시각]
+
+
+def _pace(chars: int) -> None:
+    while True:
+        now = time.time()
+        if _bucket[1]:
+            _bucket[0] = min(_BUCKET_CAP, _bucket[0] + (now - _bucket[1]) * _REFILL_PER_S)
+        _bucket[1] = now
+        if _bucket[0] >= chars or chars >= _BUCKET_CAP:
+            _bucket[0] -= chars
+            return
+        time.sleep(min(30.0, (chars - _bucket[0]) / _REFILL_PER_S))
+
+
 def _call(key: str, region: str, texts: List[str]) -> List[str]:
+    _pace(sum(len(t) for t in texts))
     body = json.dumps([{"Text": t} for t in texts]).encode("utf-8")
     req = urllib.request.Request(_ENDPOINT, data=body, method="POST")
     req.add_header("Ocp-Apim-Subscription-Key", key)
     req.add_header("Ocp-Apim-Subscription-Region", region)
     req.add_header("Content-Type", "application/json")
     last = None
-    for attempt in range(RETRY):
+    for attempt in range(RETRY_429):
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
@@ -123,7 +146,12 @@ def _call(key: str, region: str, texts: List[str]) -> List[str]:
             body_txt = e.read().decode("utf-8", "replace")
             if e.code == 429 or e.code >= 500:      # rate limit / 일시 오류 → 재시도
                 last = f"HTTP {e.code}: {body_txt}"
-                time.sleep(2 * (attempt + 1))
+                # Retry-After(초) 존중, 없으면 지수 백오프(최대 60초)
+                try:
+                    ra = int((e.headers.get("Retry-After") or "0").strip())
+                except ValueError:
+                    ra = 0
+                time.sleep(max(ra, min(60, 3 * 2 ** attempt)))
                 continue
             raise AzureError(f"HTTP {e.code}: {body_txt}")
         except urllib.error.URLError as e:
@@ -526,17 +554,19 @@ def translate_texts(texts: List[str], key: Optional[str] = None, region: Optiona
     return out
 
 
-def draft_units(proj, rel: Optional[str] = None, overwrite: bool = False) -> Dict[str, int]:
+def draft_units(proj, rel: Optional[str] = None, overwrite: bool = False,
+                progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, int]:
     """proj 의 자유 텍스트를 Azure 초안으로 채운다. deepl.draft_units 와 동일 규약.
     복원 실패 문장은 빈 칸으로 남긴다(이후 DeepL 초안 실행 시 빈 칸만 채우므로 그쪽으로 흡수).
-    반환: {translated, chars, unique, skipped}."""
+    progress(done, total) = 문장 단위 진행 콜백. 반환: {translated, chars, unique, skipped}."""
     targets = deepl._collect_targets(proj, rel, overwrite)
     if not targets:
         return {"translated": 0, "chars": 0, "unique": 0, "skipped": 0}
     uniq_jp = list(dict.fromkeys(jp for _, jp in targets))
     # 용어집(번역이 입력된 단어)을 MT 에 강제 적용 — リューン→륜 같은 고정 표기
     terms = {jp: ko for jp, ko in (proj.get("terms") or {}).items() if (ko or "").strip()}
-    trans = translate_texts(uniq_jp, glossary=terms or None)   # fallback="skip"
+    trans = translate_texts(uniq_jp, glossary=terms or None,   # fallback="skip"
+                            progress=progress)
     n = 0
     for u, jp in targets:
         dst = trans.get(jp)

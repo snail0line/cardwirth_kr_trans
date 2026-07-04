@@ -1069,7 +1069,7 @@ function renderTermList(host, list, kind) {
       orow.innerHTML = `<span class="occ-file"></span><span class="occ-prev"></span>`;
       orow.querySelector(".occ-file").textContent = o.rel.split(/[\\/]/).pop();
       orow.querySelector(".occ-prev").textContent = o.preview;
-      orow.title = o.rel;
+      orow.title = o.ko ? "번역: " + o.ko : "(미번역)";   // 그 문장의 현재 번역문
       orow.onclick = () => { closeTerms(); jumpTo(o.rel, o.sid); };
       occBox.appendChild(orow);
     });

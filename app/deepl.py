@@ -403,16 +403,18 @@ def count_chars(proj: Dict[str, Any], rel: Optional[str] = None,
 
 
 def draft_units(proj: Dict[str, Any], rel: Optional[str] = None,
-                overwrite: bool = False, force: str = "auto") -> Dict[str, int]:
+                overwrite: bool = False, force: str = "auto",
+                progress: Optional[Callable[[int, int], None]] = None) -> Dict[str, int]:
     """proj 의 자유 텍스트(제어/내부명 제외)를 DeepL 초안으로 채운다.
-    rel 지정 시 그 파일만, overwrite=False 면 빈 ko 만 번역. 반환: {translated, chars, unique}."""
+    rel 지정 시 그 파일만, overwrite=False 면 빈 ko 만 번역. 반환: {translated, chars, unique}.
+    progress(done, total) = 문장 단위 진행 콜백(일괄 툴 게이지용)."""
     targets = _collect_targets(proj, rel, overwrite)
     if not targets:
         return {"translated": 0, "chars": 0, "unique": 0}
     uniq_jp = list(dict.fromkeys(jp for _, jp in targets))
     # 용어집(번역이 입력된 단어)을 초안에 강제 적용 — リューン→륜 같은 고정 표기
     terms = {jp: ko for jp, ko in (proj.get("terms") or {}).items() if (ko or "").strip()}
-    trans = translate_texts(uniq_jp, force=force, glossary=terms or None)
+    trans = translate_texts(uniq_jp, force=force, glossary=terms or None, progress=progress)
     n = 0
     for u, jp in targets:
         dst = trans.get(jp)
