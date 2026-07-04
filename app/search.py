@@ -43,3 +43,31 @@ def search_units(proj: Dict[str, Any], query: str, scope: str = "both",
             if len(out) >= cap:
                 return out
     return out
+
+
+def replace_in_ko(proj: Dict[str, Any], query: str, repl: str,
+                  dry: bool = False, jp_cond: str = "") -> Dict[str, int]:
+    """번역문(ko) 전체에서 query → repl 리터럴 치환. 원문(jp)은 건드리지 않는다.
+    용어 오타(사바→사바나)가 초안에 구워진 뒤의 일괄 복구용. 대소문자 구분(정확 일치).
+    jp_cond 를 주면 "원문에 그 문자열이 있는 칸"만 대상으로 좁힌다
+    (예: サバンナ 문장 안의 사바만 치환 — 무관한 사바 오폭 방지).
+    dry=True 면 세기만 하고 바꾸지 않는다. 반환 {units, hits}."""
+    q = query or ""
+    jp_cond = (jp_cond or "").strip()
+    if not q or repl is None:
+        return {"units": 0, "hits": 0}
+    units = hits = 0
+    for f in proj["files"].values():
+        for u in f["units"]:
+            if u["kind"] != "free" or u.get("control"):
+                continue
+            if jp_cond and jp_cond not in textcodec.decode_field(u["field"], u["jp"]):
+                continue
+            ko = textcodec.decode_field(u["field"], u.get("ko", ""))
+            if not ko or q not in ko:
+                continue
+            units += 1
+            hits += ko.count(q)
+            if not dry:
+                u["ko"] = textcodec.encode_field(u["field"], ko.replace(q, repl))
+    return {"units": units, "hits": hits}

@@ -72,6 +72,17 @@ input[type=text] {
   color: #b91c1c; border-color: #fecaca; background: #fff; font-size: 12px; padding: 4px 10px;
 }
 .dangerghost:hover { background: rgba(185, 28, 28, 0.08); }
+/* 전역 커스텀 툴팁 — 모든 title/data-tip 을 app.js 가 가로채 이 말풍선으로 표시 */
+#globaltip {
+  position: fixed; display: none; z-index: 400;
+  max-width: 320px; width: max-content;
+  background: #111827; color: #f9fafb;
+  font-size: 12px; font-weight: 400; line-height: 1.6; text-align: left;
+  padding: 9px 12px; border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  white-space: pre-line; pointer-events: none;
+}
+
 /* 초기화 확인 모달 — 다른 모달(번역 패널 등) 위에서 열리므로 항상 최상위 */
 #confirmBox { z-index: 200; }
 .confirm-box { max-width: 440px; padding: 20px; }
@@ -384,14 +395,16 @@ input[type=text] {
 
 /* 검색 (원문/번역) */
 .search-box { width: 90vw; max-width: 860px; height: 82vh; }
-.search-bar { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; }
+/* 모달 내부 왼쪽 라인은 modal-head 와 같은 18px 로 통일
+   (sr-row 는 hover 배경용 내부 여백 10px 이 있어 컨테이너를 8px 로 상쇄) */
+.search-bar { display: flex; gap: 8px; padding: 12px 18px; border-bottom: 1px solid #e5e7eb; }
 .search-bar input { flex: 1; }
 .search-bar select { flex: 0 0 130px; }
-.search-results { overflow-y: auto; flex: 1; padding: 8px 16px; }
+.search-results { overflow-y: auto; flex: 1; padding: 8px 8px; }
 /* 경고 패널: 결과 없는 섹션은 내용 높이만큼만 차지하고 나머지 섹션에 공간을 양보 */
 .search-results.is-empty { flex: 0 0 auto; }
-.search-count { font-size: 12px; color: #6b7280; padding: 4px 0 8px; }
-.warn-section-title { font-size: 13px; font-weight: 700; color: #374151; margin: 12px 0 4px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
+.search-count { font-size: 12px; color: #6b7280; padding: 4px 10px 8px; }
+.warn-section-title { font-size: 13px; font-weight: 700; color: #374151; margin: 12px 0 4px; padding: 0 18px 4px; border-bottom: 1px solid #e5e7eb; }
 .warn-section-title:first-child { margin-top: 0; }
 .sr-row { padding: 8px 10px; border-bottom: 1px solid #f3f4f6; cursor: pointer; border-radius: 6px; }
 .sr-row:hover { background: #eff6ff; }
@@ -420,7 +433,7 @@ input[type=text] {
 .deepl-no { color: #dc2626; font-weight: 600; }
 .deepl-keybar { display: flex; gap: 8px; }
 .deepl-keybar input { flex: 1; }
-.deepl-sec .hint { font-size: 12px; color: #9ca3af; margin: 6px 0 0; }
+.deepl-sec .hint { font-size: 12px; color: #9ca3af; margin: 6px 0 12px; }
 .deepl-sec .hint code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; color: #6b7280; }
 .deepl-opt { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #374151; cursor: pointer; }
 .deepl-actions { display: flex; gap: 8px; margin-top: 12px; }

@@ -75,8 +75,63 @@ def endpoint(key: str, force: str = "auto") -> str:
     return "https://api-free.deepl.com/v2/translate" if free else "https://api.deepl.com/v2/translate"
 
 
-def _call(url: str, key: str, texts: List[str]) -> List[str]:
+def _api_base(key: str, force: str = "auto") -> str:
+    return endpoint(key, force).rsplit("/v2/", 1)[0]
+
+
+def create_glossary(key: str, terms: Dict[str, str], force: str = "auto") -> str:
+    """용어집(원문→한국어)을 DeepL 공식 glossary 리소스로 등록. 반환: glossary_id.
+
+    DeepL 이 KO 를 용어집 언어로 추가해(지원쌍 55→66) ja→ko 용어집이 공식 지원된다.
+    엔트리 제약(빈 값·탭·개행 금지) 위반 항목은 건너뛴다. 실패 시 DeepLError —
+    호출측(translate_texts)이 기존 이름 치환 방식으로 폴백한다."""
+    entries = []
+    for jp, ko in terms.items():
+        jp = (jp or "").strip()
+        ko = (ko or "").strip()
+        if not jp or not ko or any(c in jp + ko for c in "\t\n\r"):
+            continue
+        entries.append(f"{jp}\t{ko}")
+    if not entries:
+        raise DeepLError("유효한 용어가 없습니다")
+    data = urllib.parse.urlencode({
+        "name": "cwkr-terms",
+        "source_lang": "ja", "target_lang": "ko",
+        "entries": "\n".join(entries), "entries_format": "tsv",
+    }).encode("utf-8")
+    req = urllib.request.Request(_api_base(key, force) + "/v2/glossaries",
+                                 data=data, method="POST")
+    req.add_header("Authorization", f"DeepL-Auth-Key {key}")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            d = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raise DeepLError(f"glossary 생성 실패 HTTP {e.code}: "
+                         f"{e.read().decode('utf-8', 'replace')[:200]}")
+    except urllib.error.URLError as e:
+        raise DeepLError(f"glossary 생성 실패: {e}")
+    gid = d.get("glossary_id", "")
+    if not gid:
+        raise DeepLError("glossary_id 없음")
+    return gid
+
+
+def delete_glossary(key: str, gid: str, force: str = "auto") -> None:
+    """일회용 glossary 정리(계정 glossary 수 제한 방지). 실패해도 무시."""
+    try:
+        req = urllib.request.Request(_api_base(key, force) + f"/v2/glossaries/{gid}",
+                                     method="DELETE")
+        req.add_header("Authorization", f"DeepL-Auth-Key {key}")
+        urllib.request.urlopen(req, timeout=30).read()
+    except Exception:
+        pass
+
+
+def _call(url: str, key: str, texts: List[str], glossary_id: str = "") -> List[str]:
     params = [("target_lang", "KO"), ("source_lang", "JA"), ("preserve_formatting", "1")]
+    if glossary_id:
+        params.append(("glossary_id", glossary_id))
     params += [("text", t) for t in texts]
     data = urllib.parse.urlencode(params).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
@@ -235,43 +290,53 @@ def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "a
                     glossary: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """텍스트 목록 JA→KO 번역. 중복 제거 후 한 번씩만 호출. 반환: {원문: 번역}.
 
-    glossary(용어집: 원문→한국어)가 주어지면 그 단어를 안정 음차 이름으로 마스킹해
-    보내고 번역 후 사용자의 한국어 번역으로 되치환한다(리ューン→륜 강제).
-    DeepL 공식 glossary API 는 일→한 미지원이라 이 방식(azure_mt 공용 로직)을 쓴다.
-    되치환 실패 시에도 번역 결과는 그대로 쓴다(best-effort — 검수에서 확인)."""
+    glossary(용어집: 원문→한국어)가 주어지면 DeepL 공식 glossary(ja→ko 지원)를
+    일회용으로 등록해 번역에 첨부하고, 끝나면 삭제한다. glossary 등록이 실패하면
+    구버전 방식(안정 음차 이름 마스킹 → 번역 후 되치환, azure_mt 공용 로직)으로
+    폴백한다. 되치환 실패 시에도 번역 결과는 그대로 쓴다(best-effort)."""
     key = key or load_key()
     if not key:
         raise DeepLError("DeepL 키가 없습니다.")
     url = endpoint(key, force)
     uniq = list(dict.fromkeys(t for t in texts if t and t.strip()))
+    gid = ""
     gmap: Dict[str, tuple] = {}
     send = uniq
     if glossary:
-        from . import azure_mt                       # 함수 내 임포트 (순환 방지)
-        send = []
-        for t in uniq:
-            m, used = azure_mt.mask_glossary(t, glossary)
-            gmap[t] = used
-            send.append(m)
+        try:
+            gid = create_glossary(key, glossary, force)
+        except DeepLError:
+            gid = ""                                 # 공식 glossary 실패 → 마스킹 폴백
+        if not gid:
+            from . import azure_mt                   # 함수 내 임포트 (순환 방지)
+            send = []
+            for t in uniq:
+                m, used = azure_mt.mask_glossary(t, glossary)
+                gmap[t] = used
+                send.append(m)
     out: Dict[str, str] = {}
-    for s in range(0, len(uniq), BATCH):
-        chunk_src = uniq[s: s + BATCH]
-        chunk = send[s: s + BATCH]
-        res = _call(url, key, chunk)
-        if len(res) != len(chunk):
-            raise DeepLError(f"응답 개수 불일치: 요청 {len(chunk)} vs 응답 {len(res)}")
-        for src, dst in zip(chunk_src, res):
-            if glossary and gmap.get(src):
-                from . import azure_mt
-                dst = azure_mt.unmask_glossary(dst, gmap[src])   # 음차 → 사용자 번역
-            dst = _restore_quotes(src, dst)         # 원문에 없는 '' "" 억제 / 「」『』 복원
-            dst = _restore_indent(src, dst)         # 줄머리 전각공백 들여쓰기 복원
-            dst = _restore_vars(src, dst)           # $...$ 변수 참조 원문 복원
-            dst = _restore_color_space(src, dst)    # 색상코드 뒤 덧붙은 반각공백 제거
-            dst = _restore_ellipsis(src, dst)       # ASCII '...' → 전각 '…' 복원
-            out[src] = dst
-        if progress:
-            progress(min(s + BATCH, len(uniq)), len(uniq))
+    try:
+        for s in range(0, len(uniq), BATCH):
+            chunk_src = uniq[s: s + BATCH]
+            chunk = send[s: s + BATCH]
+            res = _call(url, key, chunk, glossary_id=gid)
+            if len(res) != len(chunk):
+                raise DeepLError(f"응답 개수 불일치: 요청 {len(chunk)} vs 응답 {len(res)}")
+            for src, dst in zip(chunk_src, res):
+                if glossary and gmap.get(src):
+                    from . import azure_mt
+                    dst = azure_mt.unmask_glossary(dst, gmap[src])   # 음차 → 사용자 번역
+                dst = _restore_quotes(src, dst)         # 원문에 없는 '' "" 억제 / 「」『』 복원
+                dst = _restore_indent(src, dst)         # 줄머리 전각공백 들여쓰기 복원
+                dst = _restore_vars(src, dst)           # $...$ 변수 참조 원문 복원
+                dst = _restore_color_space(src, dst)    # 색상코드 뒤 덧붙은 반각공백 제거
+                dst = _restore_ellipsis(src, dst)       # ASCII '...' → 전각 '…' 복원
+                out[src] = dst
+            if progress:
+                progress(min(s + BATCH, len(uniq)), len(uniq))
+    finally:
+        if gid:
+            delete_glossary(key, gid, force)            # 일회용 glossary 정리
     return out
 
 

@@ -75,6 +75,16 @@ def _picker_code(kind: str) -> str:
                 " initialdir=os.environ.get('CW_INITDIR',''),"
                 " initialfile=os.environ.get('CW_INITFILE',''),"
                 " filetypes=[('CardWirth 패키지 (.wsn)','*.wsn'),('폴더로 저장','*')])\n")
+    elif kind == "csv_save":   # 번역 CSV 내보내기 저장 위치
+        call = ("p=filedialog.asksaveasfilename(title='번역 CSV 내보내기', parent=r,"
+                " defaultextension='.csv',"
+                " initialdir=os.environ.get('CW_INITDIR',''),"
+                " initialfile=os.environ.get('CW_INITFILE',''),"
+                " filetypes=[('CSV','*.csv'),('모든 파일','*.*')])\n")
+    elif kind == "csv_open":   # 번역된 CSV 가져오기
+        call = ("p=filedialog.askopenfilename(title='번역 CSV 가져오기', parent=r,"
+                " initialdir=os.environ.get('CW_INITDIR',''),"
+                " filetypes=[('CSV','*.csv'),('모든 파일','*.*')])\n")
     else:                  # 시나리오 XML 폴더 선택
         call = "p=filedialog.askdirectory(title='CardWirth scenario XML folder', parent=r)\n"
     return (
@@ -545,6 +555,18 @@ class Handler(BaseHTTPRequestHandler):
             terms.remove_manual(p, (data.get("jp") or "").strip())
             project.save(p)
             return self._json({"ok": True})
+
+        if u.path == "/api/replace_ko":
+            # 번역문 전체 찾아 바꾸기 (원문은 불변). dry=True 면 개수만 반환.
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            q = data.get("q") or ""
+            repl = data.get("repl")
+            if not q or repl is None:
+                return self._json({"error": "검색어를 입력하세요"}, 400)
+            r = search.replace_in_ko(p, q, repl, dry=bool(data.get("dry")),
+                                     jp_cond=data.get("jp_cond") or "")
+            return self._json({"ok": True, **r, "stats": _stats()})
 
         if u.path == "/api/reset":
             # 번역을 원문 상태로 초기화. scope="file"(rel 필수) | "all"(식별자 포함).

@@ -1,5 +1,43 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
+
+// ── 전역 커스텀 툴팁 ──
+// 모든 title 속성(정적/동적)을 가로채 스타일된 말풍선(#globaltip)으로 표시한다.
+// title 은 발견 즉시 data-tip 으로 옮겨 브라우저 기본 툴팁을 억제. \n = 줄바꿈.
+(() => {
+  const tip = document.createElement("div");
+  tip.id = "globaltip";
+  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(tip));
+  let target = null, timer = null;
+  const hide = () => { clearTimeout(timer); target = null; tip.style.display = "none"; };
+  document.addEventListener("mouseover", (e) => {
+    const t = e.target.closest("[title], [data-tip]");
+    if (!t) return;
+    if (t.hasAttribute("title")) {          // 갱신된 title 도 매번 반영
+      t.dataset.tip = t.getAttribute("title");
+      t.removeAttribute("title");
+    }
+    if (t === target || !t.dataset.tip) return;
+    clearTimeout(timer);
+    target = t;
+    timer = setTimeout(() => {
+      if (target !== t || !document.contains(t)) return;
+      tip.textContent = t.dataset.tip;
+      tip.style.display = "block";
+      const r = t.getBoundingClientRect();
+      let x = r.left, y = r.bottom + 8;
+      x = Math.max(4, Math.min(x, window.innerWidth - tip.offsetWidth - 8));
+      if (y + tip.offsetHeight > window.innerHeight - 8) y = r.top - tip.offsetHeight - 8;
+      tip.style.left = x + "px";
+      tip.style.top = Math.max(4, y) + "px";
+    }, 350);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (target && !target.contains(e.relatedTarget)) hide();
+  });
+  document.addEventListener("click", hide, true);
+  document.addEventListener("scroll", hide, true);
+})();
 const api = async (path, opts) => (await fetch(path, opts)).json();
 const post = (path, body) =>
   api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -531,7 +569,7 @@ async function renderFlowView(rel) {
         const ed = document.createElement("button");
         ed.className = "ol-edit";
         ed.textContent = "✏";
-        ed.title = "툴에서만 보일 이름 입력 (내보내기에 안 들어감, 비우면 원문)";
+        ed.title = "툴에서만 보일 이름을 입력합니다.\n내보내기에는 들어가지 않고, 비우면 원문으로 돌아갑니다";
         ed.onclick = (ev) => {
           ev.stopPropagation();
           if (row.querySelector(".ol-editbox")) return;
@@ -689,14 +727,14 @@ function freeUnitEl(rel, u, skipAlt) {
     const b = document.createElement("span");
     b.className = "badge partial";
     b.textContent = "🈁 일본어 남음";
-    b.title = "번역문에 가나가 남아 있어 완료로 세지 않습니다 (용어 치환 초안 등)";
+    b.title = "번역문에 가나가 남아 있어 완료로 세지 않습니다.\n(용어 치환 초안 등 부분 번역 상태)";
     meta.appendChild(b);
   }
   if (u.dups > 1) {
     const b = document.createElement("span");
     b.className = "badge dup";
     b.textContent = `동일 원문 ×${u.dups}`;
-    b.title = "클릭하면 같은 원문의 위치 목록을 보여줍니다. 번역하면 미번역 동일 원문에 자동 적용됩니다";
+    b.title = "클릭하면 같은 원문의 위치 목록을 보여줍니다.\n번역하면 미번역 동일 원문에 자동 적용됩니다";
     let listEl = null;
     b.onclick = async () => {
       if (listEl) { listEl.remove(); listEl = null; return; }
@@ -980,7 +1018,7 @@ function renderTermList(host, list, kind) {
         ? `<span class="term-kindbadge choice" title="이벤트 선택지 버튼 라벨로 쓰이는 텍스트">선택지</span>`
         : `<span class="term-kindbadge" title="메시지 본문/설명 문장">문장</span>`;
     });
-    if (t.is_identifier) jp.innerHTML += `<span class="term-idbadge" title="식별자이기도 함 — 식별자 자체는 원문 유지, 자유 텍스트에서만 치환">식별자</span>`;
+    if (t.is_identifier) jp.innerHTML += `<span class="term-idbadge" title="식별자이기도 함.\n식별자 자체는 원문 유지, 자유 텍스트에서만 치환됩니다">식별자</span>`;
     jp.appendChild(document.createTextNode(t.jp.replace(/\n/g, "⏎")));   // 줄바꿈 시각화
     const cp = document.createElement("button");
     cp.className = "term-copy";
@@ -1536,11 +1574,21 @@ $("#btnOpenWsn").onclick = () => pickAndOpen("file");
 $("#scenDir").addEventListener("keydown", (e) => { if (e.key === "Enter") openScenario(); });
 $("#btnSave").onclick = async () => { const r = await post("/api/save"); toast(r.ok ? "저장됨" : "오류"); };
 $("#btnExport").onclick = doExport;
+// CSV 기본 경로(시나리오 폴더_번역.csv)를 폴더/파일명으로 분리
+function csvDefault() {
+  const def = $("#scenDir").value.trim().replace(/[\\/]+$/, "") + "_번역.csv";
+  const norm = def.replace(/\\/g, "/");
+  const slash = norm.lastIndexOf("/");
+  return { initdir: slash >= 0 ? norm.slice(0, slash) : "",
+           initfile: slash >= 0 ? norm.slice(slash + 1) : norm };
+}
 async function bulkExport() {
   if (!STATE.open) return toast("먼저 시나리오를 여세요");
-  const def = $("#scenDir").value.trim().replace(/[\\/]+$/, "") + "_번역.csv";
-  const path = prompt("내보낼 CSV 경로 (스프레드시트에서 ko 열을 번역기로 채우세요):", def);
-  if (!path) return;
+  toast("저장 위치 선택창을 여는 중…");
+  const pick = await post("/api/pick_folder", { kind: "csv_save", ...csvDefault() });
+  if (pick.error) return toast("선택창 오류: " + pick.error);
+  const path = pick.path;
+  if (!path) return;                 // 취소
   toast("내보내는 중…");
   const r = await post("/api/bulk_export", { path });
   if (r.error) return toast("오류: " + r.error);
@@ -1548,9 +1596,11 @@ async function bulkExport() {
 }
 async function bulkImport() {
   if (!STATE.open) return toast("먼저 시나리오를 여세요");
-  const def = $("#scenDir").value.trim().replace(/[\\/]+$/, "") + "_번역.csv";
-  const path = prompt("가져올 CSV 경로:", def);
-  if (!path) return;
+  toast("파일 선택창을 여는 중…");
+  const pick = await post("/api/pick_folder", { kind: "csv_open", ...csvDefault() });
+  if (pick.error) return toast("선택창 오류: " + pick.error);
+  const path = pick.path;
+  if (!path) return;                 // 취소
   toast("가져오는 중…");
   const r = await post("/api/bulk_import", { path });
   if (r.error) return toast("오류: " + r.error);
@@ -1563,8 +1613,33 @@ async function bulkImport() {
 $("#btnBulkOut").onclick = bulkExport;
 $("#btnBulkIn").onclick = bulkImport;
 $("#btnSearch").onclick = showSearch;
+// 번역문 전체 찾아 바꾸기 — 용어 오타가 초안에 구워진 뒤 일괄 복구용 (원문 불변)
+async function replaceInKo() {
+  const q = $("#searchQ").value;
+  const repl = $("#replaceKo").value;
+  const jp_cond = $("#replaceJpCond").value.trim();
+  if (!q.trim()) return toast("먼저 위 칸에 바꿀 검색어를 입력하세요");
+  const dry = await post("/api/replace_ko", { q, repl, jp_cond, dry: true });
+  if (dry.error) return toast(dry.error);
+  if (!dry.hits) return toast(jp_cond
+    ? "조건에 맞는 칸의 번역문에서 해당 문자열을 찾지 못했습니다"
+    : "번역문에서 해당 문자열을 찾지 못했습니다 (대소문자 구분)");
+  const cond = jp_cond ? `\n대상: 원문에 "${jp_cond}" 가 있는 칸만` : "";
+  const yes = await askConfirm(
+    `번역문 ${dry.units}개 칸에서 ${dry.hits}곳을 바꿉니다.${cond}\n\n"${q}" → "${repl}"\n\n원문은 건드리지 않습니다. 계속할까요?`,
+    "네, 바꿉니다");
+  if (!yes) return;
+  const r = await post("/api/replace_ko", { q, repl, jp_cond });
+  if (r.error) return toast(r.error);
+  toast(`번역문 ${r.units}개 칸 · ${r.hits}곳 바꿈`);
+  renderProgress(r.stats);
+  runSearch();                                  // 결과 목록 갱신
+  if (STATE.curRel) openFile(STATE.curRel);     // 열린 파일 화면 갱신
+}
+
 $("#searchClose").onclick = closeSearch;
 $("#searchGo").onclick = runSearch;
+$("#replaceGo").onclick = replaceInKo;
 $("#searchQ").addEventListener("keydown", (e) => { if (e.key === "Enter") runSearch(); });
 $("#searchScope").onchange = runSearch;
 $("#search").addEventListener("click", (e) => { if (e.target.id === "search") closeSearch(); });
