@@ -218,11 +218,13 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
                     and not any(c in sp for c in " 　\t"):
                 cand.add(sp)     # 공백 포함 = 이름이 아니라 문장(화자 오탐 방어)
     # 본문 속 「」『』 인용어 — 식별자/화자 어디에도 없는 고유명사를 채굴
+    mined = set()
     for t in _mine_quoted_terms(free_vals):
         if not _is_structural_id(t) and not _is_system_name(t):
-            cand.add(t)
+            mined.add(t)
     # 본문 빈출어(가타카나·한자 연속어·호칭 인물어) — 半熟/醤油/娘さん 류
-    cand |= _mine_frequent_terms(free_vals)
+    mined |= _mine_frequent_terms(free_vals)
+    mined -= cand
     # 실제 '표시 텍스트'에 등장하는 것만 용어로 센다(같은 문자열이 표시 텍스트면 남긴다):
     #  · 변수 참조($..$ / %..%) 내부는 제외 — 토큰 안 substring(二人称 등)이 용어로 잡히는 것 방지
     #  · 그 후에도 백슬래시가 남는 값(パッケージ\… 같은 시스템 경로)은 표시 텍스트가 아니므로 제외
@@ -232,6 +234,18 @@ def detect(proj: Dict[str, Any]) -> Dict[str, List[dict]]:
         if "\\" not in v2:
             disp_vals.append(v2)
     joined = "\n".join(disp_vals)
+    # 채굴 조각이 항상 더 긴 후보 안에서만 등장하면 제외 — ミューゼル卿만 쓰이는데
+    # 가타카나 조각 ミューゼル 이 따로 잡히는 것 방지. (醤油처럼 단독 등장이 있으면
+    # 醤油派 와 별개로 유지. 긴 후보 등장을 마스킹한 뒤 남은 단독 등장으로 판정)
+    allc = cand | mined
+    for t in sorted(mined, key=len):
+        masked = joined
+        for t2 in allc:
+            if t2 is not t and t2 != t and t in t2:
+                masked = masked.replace(t2, "\x00")
+        if t not in masked:
+            mined.discard(t)
+    cand |= mined
     words = [entry(t, joined.count(t), False) for t in cand if joined.count(t) >= 1]
     words.sort(key=lambda x: -x["count"])
 
