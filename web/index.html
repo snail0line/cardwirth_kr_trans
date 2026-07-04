@@ -60,6 +60,9 @@
       </span>
       <label><input type="checkbox" id="hideDone" /> 완료 숨기기</label>
       <label><input type="checkbox" id="hideControl" checked /> 제어기호 숨기기</label>
+      <span class="resetbtns">
+        <button id="btnResetFile" class="dangerghost" title="현재 파일의 번역을 모두 지우고 원문 상태로 되돌립니다">↺ 파일 초기화</button>
+      </span>
     </div>
     <div id="units" class="units"></div>
   </section>
@@ -110,6 +113,16 @@
     <div class="modal-foot">
       <span class="pk-hint">📍 위치를 눌러 펼치면 어느 파일·문장에 있는지 보이고, 클릭하면 이동합니다.</span>
       <button id="btnApplyTerms" title="미번역 칸에 원문+용어 번역이 섞인 초안을 만듭니다. DeepL/Azure 초안을 쓴다면 필요 없습니다(용어가 자동 반영됨)">용어 치환 초안(혼합) 생성</button>
+    </div>
+  </div>
+</div>
+
+<div id="confirmBox" class="modal" style="display:none">
+  <div class="modal-box confirm-box">
+    <div id="confirmMsg" class="confirm-msg"></div>
+    <div class="confirm-btns">
+      <button id="confirmYes" class="dangerfill">네, 초기화합니다</button>
+      <button id="confirmNo">아니오</button>
     </div>
   </div>
 </div>
@@ -200,6 +213,12 @@
           <button id="deeplDraftAll" class="primary">📚 전체 시나리오</button>
         </div>
         <div id="deeplResult" class="deepl-result"></div>
+      </section>
+      <section class="deepl-sec deepl-dangersec">
+        <h3>원문으로 초기화</h3>
+        <p class="hint">시나리오 전체의 번역(본문 + 식별자)을 지우고 원문 상태로 되돌립니다.
+          용어집 단어 번역·툴 표시 이름은 유지되고, 직전 상태는 <code>.bak_reset</code> 으로 백업됩니다.</p>
+        <button id="btnResetAll" class="dangerghost">⚠ 시나리오 전체 초기화</button>
       </section>
     </div>
   </div>

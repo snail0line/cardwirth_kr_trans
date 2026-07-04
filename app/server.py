@@ -437,11 +437,14 @@ class Handler(BaseHTTPRequestHandler):
             kind = data.get("kind")
             ko = data.get("ko", "")
             propagated = 0
+            stale = 0
             if kind == "free":
                 rel, uid = data["rel"], data["id"]
                 src_unit = None
+                old_disp = ""
                 for unit in p["files"][rel]["units"]:
                     if unit["id"] == uid and unit["kind"] == "free":
+                        old_disp = textcodec.decode_field(unit["field"], unit.get("ko", ""))
                         # #text 만 CardWirth 이스케이프(\\·\n), 속성(@name 선택지 등)은 raw 저장
                         unit["ko"] = textcodec.encode_field(unit["field"], ko)
                         # [완료로 표시]의 명시 완료 — 가나가 남아도 완료로 인정
@@ -465,13 +468,50 @@ class Handler(BaseHTTPRequestHandler):
                                 u2["ko"] = textcodec.encode_field(u2["field"], ko)
                                 u2.pop("mt_failed", None)
                                 propagated += 1
+                # 수정(재번역) 감지: 같은 원문 칸 중 "수정 전과 같은 번역"이 몇 곳인지
+                # 알려준다 — 프런트가 확인 후 /api/set_stale 로 함께 갱신할 수 있게.
+                if src_unit is not None and old_disp and ko.strip() and old_disp != ko:
+                    key = (src_unit["field"], src_unit["jp"])
+                    for f2 in p["files"].values():
+                        for u2 in f2["units"]:
+                            if u2 is src_unit or u2["kind"] != "free" or u2.get("control"):
+                                continue
+                            if (u2["field"], u2["jp"]) == key \
+                                    and textcodec.decode_field(u2["field"], u2.get("ko", "")) == old_disp:
+                                stale += 1
             elif kind == "entity":
                 gk = data["gkey"]
                 if gk in p["glossary"]:
                     p["glossary"][gk]["ko"] = ko
             else:
                 return self._json({"error": "bad kind"}, 400)
-            return self._json({"ok": True, "stats": _stats(), "propagated": propagated})
+            return self._json({"ok": True, "stats": _stats(), "propagated": propagated,
+                               "stale": stale})
+
+        if u.path == "/api/set_stale":
+            # 동일 원문 칸 중 "수정 전과 같은 번역"만 새 번역으로 갱신.
+            # 문맥에 맞게 직접 다르게 번역해 둔 칸은 값이 달라서 자연히 보호된다.
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            rel, uid = data.get("rel"), data.get("id")
+            old_ko = data.get("old_ko") or ""
+            ko = data.get("ko") or ""
+            src = next((x for x in p["files"].get(rel, {}).get("units", [])
+                        if x["id"] == uid and x["kind"] == "free"), None)
+            if src is None or not old_ko or not ko:
+                return self._json({"error": "bad request"}, 400)
+            key = (src["field"], src["jp"])
+            n = 0
+            for f2 in p["files"].values():
+                for u2 in f2["units"]:
+                    if u2 is src or u2["kind"] != "free" or u2.get("control"):
+                        continue
+                    if (u2["field"], u2["jp"]) == key \
+                            and textcodec.decode_field(u2["field"], u2.get("ko", "")) == old_ko:
+                        u2["ko"] = textcodec.encode_field(u2["field"], ko)
+                        u2.pop("mt_failed", None)
+                        n += 1
+            return self._json({"ok": True, "applied": n, "stats": _stats()})
 
         if u.path == "/api/term":
             if not p:
@@ -505,6 +545,38 @@ class Handler(BaseHTTPRequestHandler):
             terms.remove_manual(p, (data.get("jp") or "").strip())
             project.save(p)
             return self._json({"ok": True})
+
+        if u.path == "/api/reset":
+            # 번역을 원문 상태로 초기화. scope="file"(rel 필수) | "all"(식별자 포함).
+            # 용어집(terms)·수동 용어·툴 표시 이름은 유지. 직전 상태는 .bak_reset 백업.
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            scope = data.get("scope")
+            rel = (data.get("rel") or "").strip()
+            if scope not in ("file", "all") or (scope == "file" and rel not in p["files"]):
+                return self._json({"error": "bad scope/rel"}, 400)
+            pp = project.project_path(p["scenario_dir"])
+            if os.path.isfile(pp):
+                shutil.copyfile(pp, pp + ".bak_reset")      # 실수 대비 1회 백업
+            n = 0
+            for r2, fd in p["files"].items():
+                if scope == "file" and r2 != rel:
+                    continue
+                for u2 in fd["units"]:
+                    if u2["kind"] != "free":
+                        continue
+                    if u2.get("ko"):
+                        n += 1
+                    u2["ko"] = ""
+                    u2.pop("force_done", None)
+                    u2.pop("mt_failed", None)
+            if scope == "all":
+                for g in p["glossary"].values():
+                    if g.get("ko"):
+                        n += 1
+                    g["ko"] = ""
+            project.save(p)
+            return self._json({"ok": True, "cleared": n, "stats": _stats()})
 
         if u.path == "/api/tool_name":
             # 툴 전용 표시 이름(흐름 패널/흐름 보기 라벨 번역) — export 에 안 들어감

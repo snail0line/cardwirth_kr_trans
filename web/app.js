@@ -754,6 +754,7 @@ function freeUnitEl(rel, u, skipAlt) {
   let markDoneBtn = null;   // [완료로 표시] — 완료 상태에 따라 표시/숨김
   const commit = async (newKo, force = false) => {
     if (newKo === (u.ko || "") && force === !!u.force_done) return;
+    const prevKo = u.ko || "";
     u.ko = newKo;
     u.force_done = force && !!newKo;    // 일반 편집은 명시 완료 해제
     el.classList.toggle("done", isDone(u));
@@ -769,6 +770,20 @@ function freeUnitEl(rel, u, skipAlt) {
       if (t2) t2.value = newKo || u.jp;
       other.classList.toggle("done", isDone(u));
     });
+    // 수정(재번역) 시: 동일 원문 칸 중 "수정 전과 같은 번역"이 있으면 함께 고칠지 확인
+    if (res.stale && newKo && prevKo && prevKo !== newKo) {
+      const yes = await askConfirm(
+        `동일 원문 ${res.stale}곳이 수정 전과 같은 번역입니다.\n함께 고칠까요?\n\n(다르게 번역해 둔 칸은 건드리지 않습니다)`,
+        "네, 함께 고칩니다");
+      if (yes) {
+        const r2 = await post("/api/set_stale", { rel, id: u.id, old_ko: prevKo, ko: newKo });
+        if (r2.error) toast(r2.error);
+        else {
+          toast(`동일 원문 ${r2.applied}곳 함께 수정했어요`);
+          renderProgress(r2.stats);
+        }
+      }
+    }
   };
 
   ta.onblur = () => {
@@ -1394,6 +1409,35 @@ async function runDeeplDraft(scope) {
   if (STATE.curRel) openFile(STATE.curRel);
 }
 
+// ── 번역 원문 초기화 ──
+function askConfirm(msg, yesLabel = "네") {
+  return new Promise((resolve) => {
+    $("#confirmMsg").textContent = msg;
+    $("#confirmYes").textContent = yesLabel;
+    $("#confirmBox").style.display = "flex";
+    const done = (v) => { $("#confirmBox").style.display = "none"; resolve(v); };
+    $("#confirmYes").onclick = () => done(true);
+    $("#confirmNo").onclick = () => done(false);
+  });
+}
+
+async function resetTranslations(scope) {
+  if (!STATE.open) return toast("먼저 시나리오를 여세요");
+  if (scope === "file" && !STATE.curRel) return toast("먼저 파일을 여세요");
+  const msg = scope === "file"
+    ? `현재 파일의 번역을 모두 지우고 원문 상태로 되돌립니다.\n\n${STATE.curRel}\n\n정말로 초기화하시겠습니까?`
+    : "시나리오 전체의 번역(본문 + 식별자)을 모두 지우고\n원문 상태로 되돌립니다.\n\n용어집 단어 번역과 툴 표시 이름은 유지됩니다.\n\n정말로 초기화하시겠습니까?";
+  if (!(await askConfirm(msg, "네, 초기화합니다"))) return;
+  const r = await post("/api/reset", { scope, rel: STATE.curRel });
+  if (r.error) return toast(r.error);
+  toast(`번역 ${r.cleared}개 초기화 (직전 상태는 projects/….bak_reset 에 백업)`);
+  renderProgress(r.stats);
+  const s = await api("/api/state");
+  STATE.files = s.files || [];
+  renderFileList();
+  if (STATE.curRel) openFile(STATE.curRel);
+}
+
 // ── 스토리 흐름 플로우차트 ──
 let flowInited = false;
 async function showFlow() {
@@ -1551,6 +1595,8 @@ $("#termAdd").onclick = addTerm;
 $("#termAddKo").addEventListener("keydown", (e) => { if (e.key === "Enter") addTerm(); });
 $("#termAddJp").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#termAddKo").focus(); });
 $("#terms").addEventListener("click", (e) => { if (e.target.id === "terms") closeTerms(); });
+$("#btnResetFile").onclick = () => resetTranslations("file");
+$("#btnResetAll").onclick = () => resetTranslations("all");
 $("#flowClose").onclick = closeFlow;
 $("#flowAll").onchange = showFlow;
 $("#flowEdit").onchange = () => { if (!$("#flowEdit").checked) $("#flowNameBar").style.display = "none"; };

@@ -66,6 +66,22 @@ input[type=text] {
 .content { flex: 1; overflow-y: auto; padding: 18px 22px; }
 .viewtitle { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
 .filterbar { display: flex; gap: 16px; margin-bottom: 14px; color: #6b7280; font-size: 13px; align-items: center; }
+/* 원문 초기화 버튼 — 위험 액션이라 필터바 오른쪽 끝에 은은하게 */
+.resetbtns { margin-left: auto; display: flex; gap: 6px; }
+.dangerghost {
+  color: #b91c1c; border-color: #fecaca; background: #fff; font-size: 12px; padding: 4px 10px;
+}
+.dangerghost:hover { background: rgba(185, 28, 28, 0.08); }
+/* 초기화 확인 모달 — 다른 모달(번역 패널 등) 위에서 열리므로 항상 최상위 */
+#confirmBox { z-index: 200; }
+.confirm-box { max-width: 440px; padding: 20px; }
+.confirm-msg { white-space: pre-line; font-size: 14px; color: #111827; line-height: 1.6; margin-bottom: 16px; }
+.confirm-btns { display: flex; gap: 8px; justify-content: flex-end; }
+.dangerfill { background: #dc2626; border-color: #dc2626; color: #fff; }
+.dangerfill:hover { background: #b91c1c; }
+/* 번역 초안 패널의 전체 초기화 섹션 — 위 액션들과 시각적으로 분리 */
+.deepl-dangersec { border-top: 1px solid #fecaca; padding-top: 12px; }
+.deepl-dangersec h3 { color: #b91c1c; }
 .viewtabs { display: inline-flex; gap: 0; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden; }
 .viewtab { border: none; border-radius: 0; padding: 5px 12px; background: #fff; color: #6b7280; }
 .viewtab + .viewtab { border-left: 1px solid #d1d5db; }
