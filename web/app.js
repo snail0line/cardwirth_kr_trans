@@ -1344,13 +1344,16 @@ async function runOverflow() {
   const r = await api(`/api/overflow?scope=${encodeURIComponent(scope)}${rel}`);
   if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
   renderOverflowResults(r.results || []);
+  refreshTermCheck();
+}
+async function refreshTermCheck() {
   const tc = await api("/api/term_check");
-  renderTermCheck(tc.results || []);
+  if (!tc.error) renderTermCheck(tc.results || [], tc.ignored_rows || 0, tc.ignored_terms || 0);
 }
 
 // 용어 불일치 — 원문에 용어가 있는데 번역문에 그 표기가 없는 문장 (옛 표기 의심).
 // 용어별로 묶어 건수를 보여주고, 그룹을 펼치면 문장 목록 + 찾아 바꾸기로 바로 이동.
-function renderTermCheck(list) {
+function renderTermCheck(list, ignoredRows, ignoredTerms) {
   const box = $("#termCheckResults");
   if (!box) return;
   box.innerHTML = "";
@@ -1360,6 +1363,17 @@ function renderTermCheck(list) {
   head.textContent = list.length
     ? `${list.length}건${list.length >= 300 ? "+ (상한)" : ""} — 용어를 펼쳐 옛 표기를 확인하고 [🔍 찾아 바꾸기]로 교정하세요`
     : "용어 불일치가 없습니다 👍";
+  if (ignoredRows || ignoredTerms) {
+    const un = document.createElement("button");
+    un.className = "tc-fix";
+    un.style.marginLeft = "8px";
+    un.textContent = `무시 중 ${ignoredTerms}용어·${ignoredRows}문장 — 모두 해제`;
+    un.onclick = async () => {
+      await post("/api/term_ignore", { clear: true });
+      refreshTermCheck();
+    };
+    head.appendChild(un);
+  }
   box.appendChild(head);
   // 용어별 그룹핑 (건수 많은 순)
   const groups = new Map();
@@ -1396,7 +1410,18 @@ function renderTermCheck(list) {
         runSearch();   // 원문 조건만으로 바로 검색 — 해당 문장 전부 표시
         toast(`원문에 ${term} 가 있는 문장을 표시했어요 — 옛 표기가 보이면 검색어에 입력해 좁히세요`);
       };
-      gh.appendChild(caret); gh.appendChild(lab); gh.appendChild(cnt); gh.appendChild(fix);
+      const mute = document.createElement("button");
+      mute.className = "tc-fix";
+      mute.textContent = "🙈 용어 무시";
+      mute.title = `"${term}" 를 이 시나리오의 불일치 검사에서 제외합니다 (오탐이 많은 용어용).
+상단의 "모두 해제"로 되돌릴 수 있습니다`;
+      mute.onclick = async (e) => {
+        e.stopPropagation();
+        await post("/api/term_ignore", { term });
+        toast(`불일치 검사에서 제외: ${term}`);
+        refreshTermCheck();
+      };
+      gh.appendChild(caret); gh.appendChild(lab); gh.appendChild(cnt); gh.appendChild(fix); gh.appendChild(mute);
       const body = document.createElement("div");
       body.style.display = "none";
       g.rows.forEach((m) => {
@@ -1408,6 +1433,16 @@ function renderTermCheck(list) {
         row.querySelector(".sr-jp").innerHTML = hl(m.jp, m.term);   // 걸린 용어 하이라이트
         row.querySelector(".sr-ko").textContent = m.ko;
         row.onclick = () => { closeOverflow(); jumpTo(m.rel, m.sid); };
+        const ig = document.createElement("button");
+        ig.className = "tc-ignore";
+        ig.textContent = "무시";
+        ig.title = "이 문장의 이 용어 불일치를 목록에서 제외합니다 (오탐/의도된 번역)";
+        ig.onclick = async (e) => {
+          e.stopPropagation();
+          await post("/api/term_ignore", { term: m.term, rel: m.rel, sid: m.sid });
+          refreshTermCheck();
+        };
+        row.querySelector(".sr-top").appendChild(ig);
         body.appendChild(row);
       });
       gh.onclick = () => {

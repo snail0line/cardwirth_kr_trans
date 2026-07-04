@@ -325,7 +325,10 @@ class Handler(BaseHTTPRequestHandler):
             p = STATE["proj"]
             if not p:
                 return self._json({"error": "no project"}, 404)
-            return self._json({"results": terms.term_mismatches(p)})
+            ig = p.get("term_check_ignores") or {}
+            return self._json({"results": terms.term_mismatches(p),
+                               "ignored_rows": len(ig.get("rows") or []),
+                               "ignored_terms": len(ig.get("terms") or [])})
 
         if u.path == "/api/flow":
             p = STATE["proj"]
@@ -651,6 +654,27 @@ class Handler(BaseHTTPRequestHandler):
             if not jp:
                 return self._json({"error": "단어를 입력하세요"}, 400)
             terms.set_global(jp, data.get("ko") or "")
+            return self._json({"ok": True})
+
+        if u.path == "/api/term_ignore":
+            # 용어 불일치 무시 — rel+sid 있으면 그 문장·용어만, 없으면 용어 전체.
+            # clear=True 면 무시 목록 초기화.
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            ig = p.setdefault("term_check_ignores", {"rows": [], "terms": []})
+            if data.get("clear"):
+                ig["rows"], ig["terms"] = [], []
+            else:
+                term = (data.get("term") or "").strip()
+                if not term:
+                    return self._json({"error": "용어가 없습니다"}, 400)
+                if data.get("rel") is not None and data.get("sid") is not None:
+                    key = f"{data['rel']}|{data['sid']}|{term}"
+                    if key not in ig["rows"]:
+                        ig["rows"].append(key)
+                elif term not in ig["terms"]:
+                    ig["terms"].append(term)
+            project.save(p)
             return self._json({"ok": True})
 
         if u.path == "/api/reapply_terms":

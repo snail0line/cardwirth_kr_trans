@@ -372,6 +372,13 @@ input[type=text] {
 .tc-label { font-weight: 600; color: #374151; font-size: 13px; }
 .tc-fix { margin-left: auto; padding: 3px 10px; font-size: 12px; flex: none; }
 .tc-fix:hover { border-color: #bfdbfe; color: #2563eb; }
+.tc-fix + .tc-fix { margin-left: 6px; }   /* 찾아 바꾸기 옆 용어 무시 버튼 */
+.tc-ignore {
+  float: right; padding: 1px 8px; font-size: 11px; color: #9ca3af;
+  border: 1px solid #e5e7eb; border-radius: 4px; background: #fff; visibility: hidden;
+}
+.sr-row:hover .tc-ignore { visibility: visible; }
+.tc-ignore:hover { color: #b91c1c; border-color: #fecaca; }
 
 /* 섹션 접기 */
 .sec-caret { color: #9ca3af; width: 12px; flex: none; }

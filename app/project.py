@@ -90,6 +90,9 @@ def merge(old: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str, Any]:
     # 공용 용어집 사용 여부 보존
     if "use_global_terms" in old:
         fresh["use_global_terms"] = old["use_global_terms"]
+    # 용어 불일치 무시 목록 보존 (행 키의 sid 는 재추출로 어긋날 수 있음 — 용어 무시는 안전)
+    if old.get("term_check_ignores"):
+        fresh["term_check_ignores"] = old["term_check_ignores"]
     # 글로서리: 같은 gkey 의 ko 보존
     for k, g in fresh["glossary"].items():
         if k in old.get("glossary", {}) and old["glossary"][k].get("ko"):

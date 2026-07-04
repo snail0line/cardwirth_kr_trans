@@ -480,8 +480,15 @@ def term_mismatches(proj: Dict[str, Any], cap: int = 300) -> List[dict]:
     완성 번역 목록 — 공용 용어집 도입 전의 "옛 표기" 발견용.
 
     원문 단어가 번역문에 그대로 남은 것(부분 번역)은 재적용 대상이므로 제외.
+    무시 목록(proj["term_check_ignores"] = {"rows": ["rel|sid|용어"], "terms": [용어]})에
+    든 것도 제외 — 오탐(以上 의 문법적 쓰임 등)을 치우는 용도.
     반환: [{rel, sid, term, term_ko, jp, ko}] (문장·용어당 1행)."""
     terms = effective_terms(proj)
+    ig = proj.get("term_check_ignores") or {}
+    ig_rows = set(ig.get("rows") or [])
+    ig_terms = set(ig.get("terms") or [])
+    for t in ig_terms:
+        terms.pop(t, None)
     if not terms:
         return []
     out: List[dict] = []
@@ -501,7 +508,8 @@ def term_mismatches(proj: Dict[str, Any], cap: int = 300) -> List[dict]:
             for tj, tk in sorted(terms.items(), key=lambda kv: -len(kv[0])):
                 if tj not in work:
                     continue
-                hit = tk not in ko and tj not in ko
+                hit = tk not in ko and tj not in ko \
+                    and f"{rel}|{u['id']}|{tj}" not in ig_rows
                 work = work.replace(tj, "\x00" * len(tj))
                 if hit:
                     # 발췌는 용어 등장 위치를 중심으로 (앞부분만 자르면 용어가 안 보임)
