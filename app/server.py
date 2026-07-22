@@ -13,7 +13,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, azure_mt, search, overflow, dupchoice, update
+from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, azure_mt, search, overflow, dupchoice, update, keycode
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 TOOLS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools"))
@@ -631,6 +631,15 @@ class Handler(BaseHTTPRequestHandler):
                     g["ko"] = ""
             project.save(p)
             return self._json({"ok": True, "cleared": n, "stats": _stats()})
+
+        if u.path == "/api/keycode_fill":
+            # 키코드 병기 채우기 — 내장 사전으로 JP 키코드에 KO 줄을 덧붙인다(초안).
+            # ko 있는 키코드는 보존(검수한 값). 배치 작업이라 즉시 저장.
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            r = keycode.fill_bilingual(p)
+            project.save(p)
+            return self._json({"ok": True, "stats": _stats(), **r})
 
         if u.path == "/api/tool_name":
             # 툴 전용 표시 이름(흐름 패널/흐름 보기 라벨 번역) — export 에 안 들어감

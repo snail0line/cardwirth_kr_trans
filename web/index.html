@@ -23,6 +23,7 @@
       <button id="btnOverflow" title="선택지 중복번역 + 메시지창 넘침(7줄 초과) 찾기">⚠ 경고</button>
       <button id="btnFlow">🔀 흐름</button>
       <button id="btnTerms">📖 용어집</button>
+      <button id="btnIdents" title="식별자(플래그·스텝·쿠폰·링크·시나리오명)·키코드 번역 — 정의부와 참조부에 동시 적용">🔑 식별자</button>
     </div>
     <div class="actions">
       <button id="btnDeepl" title="DeepL/Azure 로 번역 초안 자동 생성">🌐 번역 초안</button>
@@ -126,6 +127,25 @@
     <div class="modal-foot">
       <span class="pk-hint">📍 위치를 눌러 펼치면 어느 파일·문장에 있는지 보이고, 클릭하면 이동합니다.</span>
       <button id="btnApplyTerms" title="미번역 칸에 원문+용어 번역이 섞인 초안을 만듭니다.&#10;DeepL/Azure 초안을 쓴다면 필요 없습니다 (용어가 자동 반영됨)">용어 치환 초안(혼합) 생성</button>
+    </div>
+  </div>
+</div>
+
+<div id="idents" class="modal" style="display:none">
+  <div class="modal-box terms-box id-box">
+    <div class="modal-head">
+      <span>🔑 식별자 · 키코드 번역 <span class="hint" style="font-weight:400">정의부·참조부에 동시 적용 → 매칭 유지</span></span>
+      <button id="identsClose" class="x">✕</button>
+    </div>
+    <div class="id-banner">
+      식별자(플래그·스텝·쿠폰·시나리오명)는 게임 로직이 <b>이름으로 참조</b>합니다.
+      번역하면 <b>정의부와 모든 참조부에 같은 번역이 자동 적용</b>되어 매칭이 유지됩니다.
+      번역하지 않으려면 <b>비워 두세요 → 원문(일본어) 유지</b>. 키코드는 원문을 지우지 않고 한국어 줄을 <b>덧붙이는(병기)</b> 방식입니다.
+    </div>
+    <div class="terms-body2" id="identsBody"></div>
+    <div class="modal-foot">
+      <span class="pk-hint">비우면 원문(일본어) 유지 · 🔗링크는 화면 비노출이라 진행률에서 제외됩니다</span>
+      <span id="identsCount" class="id-footcount"></span>
     </div>
   </div>
 </div>

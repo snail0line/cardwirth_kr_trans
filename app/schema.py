@@ -51,11 +51,13 @@ ENTITY_ATTR = {
     "scenario": ENT_SCENARIO,
     "keycode": ENT_KEYCODE,
 }
-# Link(스타트 이름)는 완전 비노출 내부 라벨이라 번역 대상에서 제외(2026-07-04 사용자 결정
-# — 전 프로젝트 1,618개 중 번역된 것 0). 추출 자체를 안 하고 원문 그대로 유지한다.
-# <Start name>/<Link link>/<Call call> 이 자유 텍스트(@name)로 새지 않게 명시 스킵.
-LINK_SKIP_ATTRS = {("Start", "name"), ("Link", "link"), ("Call", "call"),
-                   ("Link", "call"), ("Call", "link")}
+# <Start name>(정의) ↔ <Link link>/<Call call>(참조) = 라인 간 점프 라벨.
+# 이름 매칭으로 연결되므로 ENT_LINK 엔티티로 다룬다(고유 원문 1개당 1번역 →
+# 정의부+참조부 동시 적용 = 매칭 유지). The Cave 등 식별자까지 번역하는 시나리오 지원
+# (2026-07-22 — 2026-07-04 "비노출이라 스킵" 결정 번복: 매칭만 유지되면 번역 허용).
+# ※ type="Package" 의 link/call 값은 대상 패키지 Id(숫자)라 번역 대상이 아님 → 숫자면 스킵.
+LINK_ATTRS = {("Start", "name"), ("Link", "link"), ("Call", "call"),
+              ("Link", "call"), ("Call", "link")}
 
 # ── 자유 텍스트: 요소 텍스트(#text) ────────────────────────────────────────
 # 항상 자유 텍스트인 tag
@@ -168,9 +170,14 @@ def slot_for_attr(tag: str, attr: str, value: str) -> Optional[Slot]:
     a = attr.lower()
     if a in SKIP_ATTRS:
         return None
-    # Link(스타트 이름) 정의/참조 — 비노출 내부 라벨, 번역 대상 아님
-    if (tag, a) in LINK_SKIP_ATTRS or a == "link":
-        return None
+    # Link/Start/Call 점프 라벨 → ENT_LINK 엔티티. 단 type="Package" 의 숫자 Id 는
+    # 로직 참조라 제외(is_nontext_label 이 순수 숫자를 걸러 준다).
+    if (tag, a) in LINK_ATTRS:
+        if is_nontext_label(value):
+            return None
+        return Slot(f"@{attr}", tag, None, "entity", ENT_LINK, value)
+    if a == "link":
+        return None   # 그 밖의 @link(대상 참조)는 번역 대상 아님
     # 엔티티 참조 속성
     et = ENTITY_ATTR.get(a)
     if et:

@@ -249,7 +249,10 @@ function toast(msg) {
 
 function renderProgress(stats) {
   if (!stats || !stats.free_total) { $("#progress").textContent = "—"; return; }
-  $("#progress").textContent = `번역 ${stats.free_done}/${stats.free_total} · 파일 ${stats.files}`;
+  let s = `본문 ${stats.free_done}/${stats.free_total} · 파일 ${stats.files}`;
+  // 식별자(링크 제외) 진행률 — 있을 때만 표시
+  if (stats.entity_total) s += ` · 식별자 ${stats.entity_done}/${stats.entity_total}`;
+  $("#progress").textContent = s;
 }
 
 function renderFileList() {
@@ -1000,6 +1003,154 @@ function freeUnitEl(rel, u, skipAlt) {
   else if (isCard) right.appendChild(cardPrev);
   el.appendChild(left); el.appendChild(right);
   return el;
+}
+
+// ── 식별자 · 키코드 패널 ──
+// 종류별 메타: 표시 순서·라벨·아이콘·설명. keycode=병기 버튼, collapsed=기본 접힘.
+const ETYPE_META = {
+  KeyCode:  { label: "키코드", icon: "🔤", keycode: true,
+    desc: "아이템/스킬 종류 매칭 태그. 한글판 표준 아이템과 호환되게 <b>일본어+한국어 병기</b>가 표준입니다." },
+  Coupon:   { label: "쿠폰", icon: "🎫",
+    desc: "PC/파티 표식. <b>＿</b> 접두는 시스템/숨김 쿠폰이라 원문 유지 권장." },
+  Flag:     { label: "플래그", icon: "🚩", desc: "켜짐/꺼짐 스위치 이름 (화면 비노출)." },
+  Step:     { label: "스텝", icon: "🔢", desc: "상태값 이름 (화면 비노출)." },
+  Scenario: { label: "시나리오명", icon: "📜", desc: "다른 시나리오 완료 여부 참조용 이름." },
+  Gossip:   { label: "가십(소문)", icon: "💬", desc: "소문 식별자 (화면 비노출)." },
+  Link:     { label: "링크(흐름 라벨)", icon: "🔗", collapsed: true,
+    desc: "이벤트 점프 라벨 — <b>화면 비노출</b>. 편집기·흐름도 가독성용 선택 항목이라 진행률에서 제외됩니다." },
+};
+const ETYPE_ORDER = ["KeyCode", "Coupon", "Flag", "Step", "Scenario", "Gossip", "Link"];
+
+async function showIdents() {
+  if (!STATE.open) return toast("먼저 시나리오를 여세요");
+  $("#idents").style.display = "flex";
+  await reloadIdents();
+}
+async function reloadIdents() {
+  if (!STATE.open) return;
+  const r = await api("/api/glossary");
+  renderIdents(r.glossary || []);
+}
+function renderIdents(items) {
+  const body = $("#identsBody");
+  body.innerHTML = "";
+  const groups = {};
+  items.forEach((it) => { (groups[it.etype] = groups[it.etype] || []).push(it); });
+  let entDone = 0, entTot = 0, linkDone = 0, linkTot = 0;
+  ETYPE_ORDER.forEach((et) => {
+    const list = groups[et];
+    if (!list || !list.length) return;
+    const meta = ETYPE_META[et] || { label: et, icon: "·", desc: "" };
+    const done = list.filter((x) => x.ko && x.ko.trim()).length;
+    if (et === "Link") { linkDone += done; linkTot += list.length; }
+    else { entDone += done; entTot += list.length; }
+
+    const sec = document.createElement("section");
+    sec.className = "terms-sec" + (meta.collapsed ? " collapsed" : "");
+    const h = document.createElement("h3");
+    const caret = meta.collapsed ? "▸" : "▾";
+    h.innerHTML = `<span class="id-caret">${caret}</span> ${meta.icon} ${meta.label}`
+      + ` <span class="id-count">(${done}/${list.length})</span>`;
+    if (meta.keycode) {
+      const actions = document.createElement("span");
+      actions.className = "sec-actions";
+      const b = document.createElement("button");
+      b.className = "btn-bilingual";
+      b.textContent = "🔤 병기 채우기";
+      b.title = "내장 사전에 있는 일본어 키코드에 한국어 줄을 덧붙입니다 (초안). 검수 후 저장하세요.";
+      b.onclick = (e) => { e.stopPropagation(); fillKeycodes(); };
+      actions.appendChild(b);
+      h.appendChild(actions);
+    }
+    h.querySelector(".id-caret").onclick = () => {
+      sec.classList.toggle("collapsed");
+      h.querySelector(".id-caret").textContent = sec.classList.contains("collapsed") ? "▸" : "▾";
+    };
+    sec.appendChild(h);
+    if (meta.desc) {
+      const d = document.createElement("div");
+      d.className = "id-secdesc";
+      d.innerHTML = meta.desc;
+      sec.appendChild(d);
+    }
+    const box = document.createElement("div");
+    box.className = "terms-list";
+    list.forEach((it) => box.appendChild(identRow(it, meta, h)));
+    sec.appendChild(box);
+    body.appendChild(sec);
+  });
+  if (!entTot && !linkTot) {
+    body.innerHTML = `<div class="empty">번역할 식별자가 없습니다.</div>`;
+  }
+  $("#identsCount").textContent =
+    `식별자 ${entDone}/${entTot}` + (linkTot ? ` · 링크 ${linkDone}/${linkTot}(진행률 제외)` : "");
+}
+// 원문 raw(리터럴 \n) ↔ 표시(⏎) 변환 — 키코드 여러 줄 표시용
+function kcShow(s) { return (s || "").replace(/\\n/g, "⏎"); }
+function kcRaw(s) { return (s || "").replace(/⏎/g, "\\n"); }
+
+function identRow(it, meta, headEl) {
+  const row = document.createElement("div");
+  row.className = "term-row" + (it.ko && it.ko.trim() ? " done" : "");
+  const head = document.createElement("div");
+  head.className = "term-head";
+  const jp = document.createElement("span");
+  jp.className = "term-jp";
+  jp.textContent = kcShow(it.jp);
+  if (it.etype === "Coupon" && it.jp.startsWith("＿")) {
+    jp.innerHTML += ` <span class="id-badge sys" title="시스템/숨김 쿠폰 — 원문 유지 권장">시스템(＿)</span>`;
+  }
+  const cp = document.createElement("button");
+  cp.className = "term-copy";
+  cp.textContent = "📋";
+  cp.title = "원문 복사";
+  cp.onclick = async () => {
+    try { await navigator.clipboard.writeText(it.jp); toast("원문 복사됨"); }
+    catch (e) { toast("복사 실패"); }
+  };
+  let inp;
+  if (meta.keycode) {
+    inp = document.createElement("textarea");
+    inp.className = "id-kc";
+    inp.value = kcShow(it.ko);
+    inp.placeholder = "병기 채우기로 자동 · 또는 직접 입력 (Enter=⏎ 줄 추가)";
+  } else {
+    inp = document.createElement("input");
+    inp.type = "text";
+    inp.value = it.ko || "";
+    inp.placeholder = "비우면 원문 유지";
+  }
+  inp.onblur = async () => {
+    const val = meta.keycode ? kcRaw(inp.value) : inp.value;
+    if (val === (it.ko || "")) return;
+    it.ko = val;
+    const hasKo = !!val.trim();
+    row.classList.toggle("done", hasKo);
+    const res = await post("/api/set", { kind: "entity", gkey: it.gkey, ko: val });
+    if (res.stats) renderProgress(res.stats);
+    updateSecCount(headEl);   // 섹션 헤더 (done/total) 갱신
+  };
+  head.appendChild(jp);
+  head.appendChild(cp);
+  head.appendChild(inp);
+  row.appendChild(head);
+  return row;
+}
+// 섹션 헤더의 (done/total) 카운트만 DOM 에서 다시 계산 (전체 재렌더 없이)
+function updateSecCount(headEl) {
+  const sec = headEl.closest(".terms-sec");
+  const rows = sec.querySelectorAll(".term-row");
+  const done = sec.querySelectorAll(".term-row.done").length;
+  headEl.querySelector(".id-count").textContent = `(${done}/${rows.length})`;
+}
+async function fillKeycodes() {
+  const r = await post("/api/keycode_fill", {});
+  if (!r.ok) return toast("오류");
+  toast(`키코드 ${r.filled}개 병기 채움`
+    + (r.skipped_no_match ? ` · 사전에 없음 ${r.skipped_no_match}개(직접 입력)` : "")
+    + (r.already ? ` · 기존 유지 ${r.already}개` : ""));
+  if (r.stats) renderProgress(r.stats);
+  await reloadIdents();
 }
 
 // ── 용어집 ──
@@ -1892,6 +2043,9 @@ $("#termAdd").onclick = addTerm;
 $("#termAddKo").addEventListener("keydown", (e) => { if (e.key === "Enter") addTerm(); });
 $("#termAddJp").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#termAddKo").focus(); });
 $("#terms").addEventListener("click", (e) => { if (e.target.id === "terms") closeTerms(); });
+$("#btnIdents").onclick = showIdents;
+$("#identsClose").onclick = () => { $("#idents").style.display = "none"; };
+$("#idents").addEventListener("click", (e) => { if (e.target.id === "idents") $("#idents").style.display = "none"; });
 // 용어집 섹션 접기/펼치기 — 헤더 클릭 (헤더 안 버튼/체크박스는 제외), 상태 기억
 document.querySelectorAll(".terms-sec").forEach((sec) => {
   const h = sec.querySelector("h3");

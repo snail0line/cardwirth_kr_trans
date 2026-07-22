@@ -209,10 +209,20 @@ def project_stats(proj: Dict[str, Any]) -> Dict[str, int]:
                 if u.get("ko") and (u.get("force_done")
                                     or not is_partial_ko(u["jp"], u["ko"])):
                     free_done += 1          # 가나 남은 부분 번역은 미완(명시 완료 제외)
-    ent_total = len(proj["glossary"])
-    ent_done = sum(1 for g in proj["glossary"].values() if g.get("ko"))
+    # 엔티티 진행률 — 링크(Link/Start/Call = 화면 비노출 흐름 라벨)는 분리해서 센다.
+    # 링크는 번역 '가능'하되 플레이어 진행률에는 안 넣는다(편집기 가독성용 선택 항목).
+    ent_total = ent_done = link_total = link_done = 0
+    for g in proj["glossary"].values():
+        done = bool(g.get("ko"))
+        if g.get("etype") == schema.ENT_LINK:
+            link_total += 1
+            link_done += done
+        else:
+            ent_total += 1
+            ent_done += done
     return {
         "free_total": free_total, "free_done": free_done,
         "entity_total": ent_total, "entity_done": ent_done,
+        "link_total": link_total, "link_done": link_done,
         "files": len(proj["files"]),
     }

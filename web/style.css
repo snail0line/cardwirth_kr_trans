@@ -399,7 +399,33 @@ input[type=text] {
 .terms-sec.collapsed .terms-list,
 .terms-sec.collapsed .terms-addbar { display: none; }
 .terms-sec.collapsed { margin-bottom: 6px; }
+.terms-sec.collapsed .id-secdesc { display: none; }
 .terms-sec h3 .hint { color: #9ca3af; font-weight: 400; font-size: 11px; }
+
+/* ── 식별자 · 키코드 패널 ── */
+.id-box { max-width: 780px; }
+.id-banner {
+  font-size: 12px; color: #374151; background: #eff6ff;
+  border-bottom: 1px solid #dbeafe; padding: 9px 16px; line-height: 1.55;
+}
+.id-banner b { color: #1d4ed8; }
+.id-caret { cursor: pointer; color: #9ca3af; width: 14px; display: inline-block; user-select: none; }
+.id-count { color: #9ca3af; font-weight: 400; font-size: 12px; }
+.id-secdesc { font-size: 11px; color: #9ca3af; padding: 2px 0 6px; }
+.id-footcount { margin-left: auto; font-size: 12px; color: #6b7280; }
+.id-badge {
+  font-size: 10px; padding: 1px 5px; border-radius: 4px; font-weight: 600; vertical-align: middle;
+}
+.id-badge.dict { background: #dcfce7; color: #16a34a; }
+.id-badge.keep { background: #f3f4f6; color: #6b7280; }
+.id-badge.sys  { background: #fef3c7; color: #b45309; }
+textarea.id-kc {
+  width: 260px; height: 40px; font-size: 12px; resize: vertical;
+  font-family: inherit; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 6px;
+}
+.term-row.done textarea.id-kc { border-color: #86efac; }
+.btn-bilingual { background: #2563eb; color: #fff; border: none; }
+.btn-bilingual:hover { background: #1d4ed8; }
 .term-row { display: block; padding: 4px 0; border-bottom: 1px solid #f9fafb; }
 .term-head { display: flex; gap: 8px; align-items: center; }
 .term-jp { flex: 1; display: flex; align-items: center; gap: 4px; }

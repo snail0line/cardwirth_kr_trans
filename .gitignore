@@ -31,3 +31,6 @@ tools/batch_fix_terms.py
 tools/batch_fix_terms.bat
 tools/batch_overflow.py
 tools/batch_overflow.bat
+
+# UI 목업/시안 (로컬 전용, 배포 안 함)
+_local/
