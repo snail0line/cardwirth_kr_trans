@@ -6,6 +6,8 @@ _export_test/
 *deepl_key*
 *azure_key*
 *azure_usage*
+*deepseek_key*
+*deepseek_usage*
 *cwpy_path*
 
 # 개인용 classic 변환 스크립트 (배포 안 함)
