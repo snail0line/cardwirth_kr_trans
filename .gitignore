@@ -36,3 +36,8 @@ tools/batch_overflow.bat
 
 # UI 목업/시안 (로컬 전용, 배포 안 함)
 _local/
+
+# LLM 번역 엔진 실험 (로컬 전용, 배포 안 함 — 서버/UI 미연결)
+app/ds_mt.py
+tools/compare_engines.py
+tools/compare_engines.bat
