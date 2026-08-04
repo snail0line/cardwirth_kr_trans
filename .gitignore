@@ -41,4 +41,6 @@ _local/
 app/ds_mt.py
 tools/compare_engines.py
 tools/verify_engines.py
+tools/run_local.py
+tools/run_local.bat
 tools/compare_engines.bat
