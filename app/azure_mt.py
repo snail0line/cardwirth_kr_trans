@@ -538,7 +538,7 @@ def translate_texts(texts: List[str], key: Optional[str] = None, region: Optiona
         # 위 재조립(lead0/lead_cont)이 이미 원문 기준으로 처리했다.
         dst = deepl._restore_vars(src, dst)         # $...$ 변수 참조 원문 복원
         if glossary:                                # 용어 경계 뒤 조사(음차 이름 기준으로 붙은 것) 교정
-            dst = josa.fix_after_terms(dst, glossary.values())
+            dst = josa.fix_after_terms(dst, glossary.values(), josa.dictionary())
         dst = deepl._restore_color_space(src, dst)  # 색상코드 뒤 덧붙은 반각공백 제거
         dst = deepl._restore_ellipsis(src, dst)     # ASCII '...' → 전각 '…' 복원
         # 괄호 복원은 _restore_quotes 뒤에, 그리고 줄 수가 유지된 경우에만 줄 단위 적용

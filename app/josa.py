@@ -170,10 +170,13 @@ def _particle_after(text: str, pos: int):
     return None
 
 
-def fix_after_terms(text: str, terms: Iterable[str]) -> str:
+def fix_after_terms(text: str, terms: Iterable[str],
+                    dictionary: Optional["Dictionary"] = None) -> str:
     """text 안의 각 용어 등장 자리 바로 뒤 조사를 용어의 받침에 맞춘다.
     용어 끝이 한글 음절이 아니면(변수·영문) 손대지 않는다. 긴 용어부터 처리해
-    짧은 용어가 긴 용어의 일부로 두 번 걸리지 않게 한다."""
+    짧은 용어가 긴 용어의 일부로 두 번 걸리지 않게 한다.
+    사전이 주어지면 '용어+뒤 음절' 이 표제어일 때(「마」+「을」=「마을」) 낱말로 보고 손대지 않는다 —
+    자동 적용 경로라 오탐 한 번이 번역문을 조용히 망가뜨리기 때문에 B/C 등급과 같은 가드를 둔다."""
     if not text:
         return text
     done: List[Tuple[int, int]] = []   # 이미 손댄 용어 구간
@@ -191,6 +194,8 @@ def fix_after_terms(text: str, terms: Iterable[str]) -> str:
                 i = end
                 continue
             hit = _particle_after(text, end)
+            if hit and dictionary is not None and dictionary.has(term + hit[0]):
+                hit = None          # 「마을」「배는」처럼 용어+음절이 한 낱말이면 조사가 아니다
             if hit:
                 form, pair, _ = hit
                 want = correct_form(pair, j)
