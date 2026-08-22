@@ -13,7 +13,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, azure_mt, search, overflow, dupchoice, update, keycode
+from . import project, repack, extract, textcodec, flow, terms, outline, bulkio, wsn, deepl, azure_mt, search, overflow, dupchoice, update, keycode, issues, josa
 
 WEB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 TOOLS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "tools"))
@@ -398,6 +398,20 @@ class Handler(BaseHTTPRequestHandler):
                                     "me": rel2 == rel and u2["id"] == uid})
             return self._json({"results": out})
 
+        if u.path == "/api/issues":
+            # 문제 목록 단일 채널 — mt_failed/overflow/dup_choices/term_check/josa/flow 를 한 모양으로.
+            # 기존 개별 API 는 그대로 둔다(호환). josa_all=1 이면 C등급(문서 훑기)까지.
+            p = STATE["proj"]
+            if not p:
+                return self._json({"error": "no project"}, 404)
+            scope = q.get("scope", ["all"])[0]
+            cur_rel = q.get("rel", [""])[0]
+            josa_all = q.get("josa_all", ["0"])[0] in ("1", "true", "True")
+            d = josa.dictionary()
+            return self._json({"results": issues.collect(p, scope, cur_rel, josa_all=josa_all),
+                               "kinds": issues.KIND_LABEL,
+                               "dict": {"available": d.available, "count": d.count if d.available else 0}})
+
         if u.path == "/api/mt_failed":
             p = STATE["proj"]
             if not p:
@@ -473,6 +487,30 @@ class Handler(BaseHTTPRequestHandler):
                                "stats": _stats(), "files": _file_summaries()})
 
         p = STATE["proj"]
+        if u.path == "/api/josa_apply":
+            # 조사 제안 적용 — items: [{rel, sid, fixes:[{start,end,from,to}]}]. 번역문이 그사이
+            # 바뀌어 from 이 그 자리에 없으면 그 항목은 건너뛴다(엉뚱한 글자를 바꾸지 않게).
+            if not p:
+                return self._json({"error": "no project"}, 400)
+            applied = skipped = 0
+            for it in data.get("items") or []:
+                rel, sid = it.get("rel"), it.get("sid")
+                unit = next((x for x in p["files"].get(rel, {}).get("units", [])
+                             if x["id"] == sid and x["kind"] == "free"), None)
+                if unit is None or unit.get("control"):
+                    skipped += 1
+                    continue
+                ko = textcodec.decode_field(unit["field"], unit.get("ko", ""))
+                good = [f for f in (it.get("fixes") or [])
+                        if isinstance(f.get("start"), int) and isinstance(f.get("end"), int)
+                        and ko[f["start"]:f["end"]] == f.get("from")]
+                skipped += len(it.get("fixes") or []) - len(good)
+                if not good:
+                    continue
+                unit["ko"] = textcodec.encode_field(unit["field"], josa.apply_fixes(ko, good))
+                applied += len(good)
+            return self._json({"ok": True, "applied": applied, "skipped": skipped, "stats": _stats()})
+
         if u.path == "/api/set":
             if not p:
                 return self._json({"error": "no project"}, 400)

@@ -1675,6 +1675,118 @@ function renderOverflowResults(list) {
   });
 }
 
+// ── 문제 목록 (모든 검사를 한 모양으로: /api/issues) ──
+// 종류 칩은 localStorage 에 켜고 끈 상태를 기억한다. 조사(josa) 행은 [적용] 버튼으로
+// 그 자리만 고치고, 상단 버튼은 기본 선택(preselected)된 조사 제안을 한 번에 적용한다.
+let ISSUES = { list: [], off: new Set(JSON.parse(localStorage.getItem("issues:off") || "[]")) };
+async function showIssues() {
+  if (!STATE.open) return toast("먼저 시나리오를 여세요");
+  $("#issues").style.display = "flex";
+  runIssues();
+}
+function closeIssues() { $("#issues").style.display = "none"; }
+async function runIssues() {
+  const scope = $("#issuesScope").value;
+  const box = $("#issuesResults");
+  if (scope === "file" && !STATE.curRel) { box.innerHTML = `<div class="empty">현재 열린 파일이 없습니다</div>`; return; }
+  box.innerHTML = `<div class="empty">스캔 중…</div>`;
+  const rel = STATE.curRel ? `&rel=${encodeURIComponent(STATE.curRel)}` : "";
+  const ja = $("#issuesJosaAll").checked ? "&josa_all=1" : "";
+  const r = await api(`/api/issues?scope=${encodeURIComponent(scope)}${rel}${ja}`);
+  if (r.error) { box.innerHTML = `<div class="empty">${esc(r.error)}</div>`; return; }
+  ISSUES.list = r.results || [];
+  ISSUES.kinds = r.kinds || {};
+  const d = r.dict || {};
+  $("#issuesDict").textContent = d.available
+    ? `낱말 자료: 국립국어원 표준국어대사전 표층형 ${d.count.toLocaleString()}개 (CC BY-SA 2.0 KR) — 조사 보정의 사전 가드에 사용`
+    : "낱말 자료(app/dict/korean-surface.txt)가 없어 조사 보정의 사전 가드가 꺼져 있습니다";
+  renderIssueKinds();
+  renderIssues();
+}
+function renderIssueKinds() {
+  const box = $("#issuesKinds");
+  box.innerHTML = "";
+  const counts = {};
+  ISSUES.list.forEach((i) => { counts[i.kind] = (counts[i.kind] || 0) + 1; });
+  Object.entries(ISSUES.kinds).forEach(([kind, label]) => {
+    const c = document.createElement("span");
+    c.className = "chip" + (ISSUES.off.has(kind) ? "" : " on");
+    c.innerHTML = `${esc(label)}<span class="n">${counts[kind] || 0}</span>`;
+    c.onclick = () => {
+      if (ISSUES.off.has(kind)) ISSUES.off.delete(kind); else ISSUES.off.add(kind);
+      localStorage.setItem("issues:off", JSON.stringify([...ISSUES.off]));
+      renderIssueKinds(); renderIssues();
+    };
+    box.appendChild(c);
+  });
+}
+function renderIssues() {
+  const box = $("#issuesResults");
+  box.innerHTML = "";
+  const list = ISSUES.list.filter((i) => !ISSUES.off.has(i.kind));
+  const errs = list.filter((i) => i.level === "error").length;
+  const head = document.createElement("div");
+  head.className = "search-count";
+  head.textContent = list.length
+    ? `${list.length}건 (오류 ${errs} · 경고 ${list.length - errs})${ISSUES.list.length !== list.length ? ` — 칩으로 ${ISSUES.list.length - list.length}건 숨김` : ""}`
+    : "걸린 문제가 없습니다 👍";
+  box.appendChild(head);
+  list.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "sr-row";
+    const file = m.rel.split(/[\/]/).pop();
+    const lv = `<span class="badge lv-${m.level}">${m.level === "error" ? "오류" : "경고"}</span>`;
+    const kind = `<span class="badge kind">${esc(m.kind_label || m.kind)}</span>`;
+    const grade = m.kind === "josa" && m.extra && m.extra.grade
+      ? `<span class="badge grade">${m.extra.grade}등급${m.extra.risky ? " · 조심" : ""}</span>` : "";
+    const where = m.extra && m.extra.where ? `<span class="badge spk">${esc(m.extra.where)}</span>` : "";
+    row.innerHTML = `<div class="sr-meta"><span class="sr-file" title="${esc(m.rel)}">${esc(file)}</span>${lv}${kind}${grade}${where}</div>`
+      + `<div class="sr-ko">${esc(m.message)}</div>`;
+    row.onclick = () => { closeIssues(); if (m.sid === null || m.sid === undefined) openFile(m.rel); else jumpTo(m.rel, m.sid); };
+    if (m.kind === "josa") {
+      const b = document.createElement("button");
+      b.className = "sr-apply";
+      b.textContent = "적용";
+      b.title = `${m.extra.base}${m.extra.from} → ${m.extra.base}${m.extra.to}`;
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        await applyJosa([m]);
+      };
+      row.querySelector(".sr-meta").appendChild(b);
+    }
+    box.appendChild(row);
+  });
+}
+async function applyJosa(items) {
+  const payload = items.map((m) => ({ rel: m.rel, sid: m.sid,
+    fixes: [{ start: m.extra.start, end: m.extra.end, from: m.extra.from, to: m.extra.to }] }));
+  const r = await post("/api/josa_apply", { items: payload });
+  if (r.error) return toast(r.error);
+  toast(`조사 ${r.applied}건 적용${r.skipped ? ` · ${r.skipped}건 건너뜀(문장이 바뀜)` : ""}`);
+  if (r.stats) renderProgress(r.stats);
+  if (STATE.curRel) await openFile(STATE.curRel);
+  runIssues();
+}
+async function applyJosaPreselected() {
+  const items = ISSUES.list.filter((m) => m.kind === "josa" && m.extra && m.extra.preselected);
+  if (!items.length) return toast("기본 선택된 조사 제안이 없습니다");
+  if (!confirm(`조사 제안 ${items.length}건(이름표 일치·위험하지 않은 방향)을 적용합니다.
+같은 문장에 여러 건이면 순서대로 적용됩니다. 계속할까요?`)) return;
+  // 같은 문장의 여러 건은 한 요청으로 묶는다(오프셋이 서로 어긋나지 않게 서버가 뒤에서부터 치환)
+  const by = new Map();
+  items.forEach((m) => {
+    const k = `${m.rel}|${m.sid}`;
+    if (!by.has(k)) by.set(k, { rel: m.rel, sid: m.sid, fixes: [] });
+    by.get(k).fixes.push({ start: m.extra.start, end: m.extra.end, from: m.extra.from, to: m.extra.to });
+  });
+  const r = await post("/api/josa_apply", { items: [...by.values()] });
+  if (r.error) return toast(r.error);
+  toast(`조사 ${r.applied}건 적용${r.skipped ? ` · ${r.skipped}건 건너뜀` : ""}`);
+  if (r.stats) renderProgress(r.stats);
+  if (STATE.curRel) await openFile(STATE.curRel);
+  runIssues();
+}
+
 // ── DeepL 자동 번역 초안 ──
 function renderDeeplKeyStat(d) {
   const el = $("#deeplKeyStat");
@@ -2023,6 +2135,13 @@ $("#overflowTidy").onclick = () => bulkTidyOverflow("full");
 $("#overflowTidySimple").onclick = () => bulkTidyOverflow("simple");
 $("#overflowScope").onchange = runOverflow;
 $("#overflow").addEventListener("click", (e) => { if (e.target.id === "overflow") closeOverflow(); });
+$("#btnIssues").onclick = showIssues;
+$("#issuesClose").onclick = closeIssues;
+$("#issuesGo").onclick = runIssues;
+$("#issuesScope").onchange = runIssues;
+$("#issuesJosaAll").onchange = runIssues;
+$("#issuesJosaApply").onclick = applyJosaPreselected;
+$("#issues").addEventListener("click", (e) => { if (e.target.id === "issues" ) closeIssues(); });
 $("#btnFlow").onclick = showFlow;
 $("#btnTerms").onclick = showTerms;
 $("#btnDeepl").onclick = showDeepl;

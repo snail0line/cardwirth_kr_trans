@@ -21,6 +21,7 @@
     <div class="actions">
       <button id="btnSearch" title="원문/번역으로 검색">🔍 검색</button>
       <button id="btnOverflow" title="선택지 중복번역 + 메시지창 넘침(7줄 초과) 찾기">⚠ 경고</button>
+      <button id="btnIssues" title="모든 검사를 한 목록으로 — 흐름 구조·선택지 중복·복원 실패·넘침·용어 불일치·조사 보정">📋 문제 목록</button>
       <button id="btnFlow">🔀 흐름</button>
       <button id="btnTerms">📖 용어집</button>
       <button id="btnIdents" title="식별자(플래그·스텝·쿠폰·링크·시나리오명)·키코드 번역 — 정의부와 참조부에 동시 적용">🔑 식별자</button>
@@ -231,6 +232,27 @@
     <div id="overflowResults" class="search-results"></div>
     <div class="warn-section-title">📖 용어 불일치 — 원문에 용어가 있는데 번역문에 그 표기가 없음 (옛 표기 의심)</div>
     <div id="termCheckResults" class="search-results"></div>
+  </div>
+</div>
+
+<div id="issues" class="modal" style="display:none">
+  <div class="modal-box search-box">
+    <div class="modal-head">
+      <span>문제 목록 — 모든 검사를 한 모양으로 (클릭 → 그 문장/파일로 이동)</span>
+      <button id="issuesClose" class="x">✕</button>
+    </div>
+    <div class="search-bar">
+      <select id="issuesScope">
+        <option value="all">시나리오 전체</option>
+        <option value="file">현재 파일만</option>
+      </select>
+      <label class="flow-opt" title="용어집 이름표(B등급) 밖의 어절까지 문서 전체를 훑어 조사 후보를 제안합니다.&#10;문서 안 쓰임·낱말 사전으로 거른 뒤 남는 것만 — 자동 적용되지 않습니다"><input type="checkbox" id="issuesJosaAll" /> 조사 문서 훑기(C)</label>
+      <button id="issuesGo" class="primary">다시 스캔</button>
+      <button id="issuesJosaApply" title="조사 제안 중 기본 선택된 것(이름표 일치·위험하지 않은 방향)을 한 번에 적용합니다">✔ 조사 기본 선택 적용</button>
+    </div>
+    <div id="issuesKinds" class="issues-kinds"></div>
+    <div id="issuesResults" class="search-results"></div>
+    <div class="modal-foot"><span id="issuesDict" class="pk-hint"></span></div>
   </div>
 </div>
 
