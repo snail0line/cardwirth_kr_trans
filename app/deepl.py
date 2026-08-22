@@ -17,7 +17,7 @@ import urllib.request
 import urllib.error
 from typing import Dict, List, Any, Callable, Optional
 
-from . import textcodec
+from . import textcodec, josa
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _KEY_DIR = os.path.join(_ROOT, "tools")
@@ -329,6 +329,8 @@ def translate_texts(texts: List[str], key: Optional[str] = None, force: str = "a
                 dst = _restore_quotes(src, dst)         # 원문에 없는 '' "" 억제 / 「」『』 복원
                 dst = _restore_indent(src, dst)         # 줄머리 전각공백 들여쓰기 복원
                 dst = _restore_vars(src, dst)           # $...$ 변수 참조 원문 복원
+                if glossary:                            # 용어 경계 뒤 조사(placeholder/glossary 기준으로 붙은 것) 교정
+                    dst = josa.fix_after_terms(dst, glossary.values())
                 dst = _restore_color_space(src, dst)    # 색상코드 뒤 덧붙은 반각공백 제거
                 dst = _restore_ellipsis(src, dst)       # ASCII '...' → 전각 '…' 복원
                 out[src] = dst
