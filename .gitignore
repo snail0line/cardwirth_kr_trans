@@ -45,3 +45,6 @@ tools/run_local.py
 tools/run_local.bat
 /run_local.bat
 tools/compare_engines.bat
+
+# bkit 플러그인 세션 로그(로컬 전용)
+.bkit/

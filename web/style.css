@@ -31,6 +31,7 @@ input[type=text] {
   font-size: 13px; flex: 0 0 auto;
 }
 .updatebar button.primary { padding: 4px 14px; }
+.updatebar a { color: inherit; text-decoration: underline; }
 .updatebar-x { margin-left: auto; border: none; background: none; color: #6b7280; padding: 2px 6px; }
 .openbar { display: flex; gap: 6px; flex: 1 1 auto; min-width: 0; }
 .openbar input { flex: 1 1 160px; min-width: 120px; }

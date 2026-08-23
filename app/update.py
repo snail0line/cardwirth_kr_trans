@@ -24,7 +24,7 @@ ZIP_URL = f"https://codeload.github.com/{REPO}/zip/refs/heads/{BRANCH}"
 
 # zip 에서 받아 덮어쓸 최상위 항목(이외는 무시 → 사용자 데이터 보존).
 # 파일 단위로 복사하므로, zip 에 없는 로컬 파일(tools/.deepl_key 등)은 삭제되지 않는다.
-_UPDATE_PATHS = ("app", "web", "tools", "README.md", "SCENARIO_ANALYSIS.md",
+_UPDATE_PATHS = ("app", "web", "tools", "README.md", "SCENARIO_ANALYSIS.md", "CHANGELOG.md",
                  "run.bat", "VERSION", ".gitignore")
 _BACKUP_PATHS = ("app", "web")   # 롤백용 백업(코드만)
 

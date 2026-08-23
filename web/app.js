@@ -291,7 +291,8 @@ async function checkUpdate() {
   try {
     const r = await api("/api/update_check");
     if (r && r.behind && r.latest) {
-      $("#updateMsg").textContent = `🆕 새 버전 v${r.latest} 가 나왔어요 (현재 v${r.current})`;
+      $("#updateMsg").innerHTML = `🆕 새 버전 v${r.latest} 가 나왔어요 (현재 v${r.current}) · `
+        + `<a href="https://github.com/snail0line/cardwirth_kr_trans/blob/main/CHANGELOG.md" target="_blank" rel="noopener">바뀐 내용 보기</a>`;
       $("#updateBtn").disabled = false;
       $("#updateBar").style.display = "flex";
     }

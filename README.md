@@ -5,6 +5,7 @@ CardWirthPy 시나리오(XML)의 일본어 텍스트를 추출 → 한국어 번
 
 > 📖 **시나리오 구조·흐름을 어떻게 분석하는지**(번역 대상 판별, 화자/말투, 쿠폰 분기 조건,
 > 이벤트 흐름 모델)는 **[SCENARIO_ANALYSIS.md](SCENARIO_ANALYSIS.md)** 참조.
+> 🆕 버전별로 무엇이 바뀌었는지는 **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## 빠른 시작
 
