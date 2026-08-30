@@ -466,6 +466,52 @@ class Handler(BaseHTTPRequestHandler):
                         and os.path.isfile(os.path.join(d, f))]
                 if len(wsns) == 1:
                     d = os.path.join(d, wsns[0])
+                else:
+                    # convert_translate 의 <이름>_xml 처럼 한 겹 안에 시나리오가 든 폴더:
+                    # 하위에서 Summary.xml 폴더가 정확히 하나면 그 폴더로 내려가 연다
+                    # (여기서 안 내려가면 바깥 폴더 이름으로 빈 프로젝트가 새로 생겨
+                    #  배치 번역이 든 프로젝트와 어긋난다)
+                    hits = [r for r, _dirs, files in os.walk(d) if "Summary.xml" in files]
+                    if len(hits) == 1:
+                        d = hits[0]
+            # 번역 결과물(*_KR.wsn)을 열려고 하면 원문 쪽을 찾아 그쪽을 연다 —
+            # _KR.wsn 에는 원문이 없어서 열어봤자 대조 감수가 안 된다.
+            notice = None
+            if os.path.isfile(d) and d.lower().endswith("_kr.wsn"):
+                base = os.path.basename(d)[:-len("_KR.wsn")]
+                sib_dir = os.path.dirname(os.path.abspath(d))
+                orig = None
+                # ① 배치/웹툴이 저장해 둔 원문 프로젝트(convert_translate 단일 변환)
+                pj = project.project_path(base)
+                if os.path.isfile(pj):
+                    try:
+                        with open(pj, encoding="utf-8") as fh:
+                            sd = json.load(fh).get("scenario_dir") or ""
+                    except (OSError, ValueError):
+                        sd = ""
+                    if sd and os.path.isfile(os.path.join(sd, "Summary.xml")):
+                        orig = sd
+                # ② 옆에 있는 원문 .wsn (모음 폴더 일괄 변환 — <이름>.wsn ↔ <이름>_KR.wsn)
+                if not orig:
+                    p = os.path.join(sib_dir, base + ".wsn")
+                    if os.path.isfile(p):
+                        orig = p
+                # ③ 옆에 있는 <이름>_xml 변환 폴더 / <이름> XML 폴더
+                if not orig:
+                    p = os.path.join(sib_dir, base + "_xml")
+                    if os.path.isdir(p):
+                        hits = [r for r, _dirs, files in os.walk(p) if "Summary.xml" in files]
+                        if len(hits) == 1:
+                            orig = hits[0]
+                if not orig:
+                    p = os.path.join(sib_dir, base)
+                    if os.path.isfile(os.path.join(p, "Summary.xml")):
+                        orig = p
+                if orig:
+                    d = orig
+                    notice = "_KR.wsn 은 번역 결과물이라 원문 프로젝트를 대신 열었습니다"
+                else:
+                    notice = "⚠ _KR.wsn 은 번역 결과물입니다 — 원문이 없어 대조 감수가 안 됩니다"
             src_wsn = None
             if wsn.is_wsn(d):
                 # .wsn(패키지) → 캐시에 풀어 XML 폴더처럼 사용
@@ -484,6 +530,7 @@ class Handler(BaseHTTPRequestHandler):
             project.save(STATE["proj"])
             project.save_last(src_wsn or d)  # 자동 리로드 후 복원용(.wsn 우선)
             return self._json({"ok": True, "scenario_dir": d, "src_wsn": src_wsn,
+                               "notice": notice,
                                "stats": _stats(), "files": _file_summaries()})
 
         p = STATE["proj"]

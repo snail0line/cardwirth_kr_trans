@@ -240,11 +240,11 @@ function isDone(u) {
   return !!u.ko && !isPartial(u);
 }
 
-function toast(msg) {
+function toast(msg, ms) {
   const t = $("#toast");
   t.textContent = msg; t.classList.add("show");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove("show"), 1800);
+  toast._t = setTimeout(() => t.classList.remove("show"), ms || 1800);
 }
 
 function renderProgress(stats) {
@@ -332,7 +332,11 @@ async function openScenario() {
   await refreshState();
   $("#viewTitle").textContent = "파일을 선택하세요 (" + r.files.length + "개)";
   $("#units").innerHTML = "";
-  toast("열림");
+  if (r.notice) {
+    // _KR.wsn 우회 등 — 실제로 열린 쪽 경로를 입력칸에 반영하고 오래 보여준다
+    $("#scenDir").value = r.src_wsn || r.scenario_dir;
+    toast(r.notice, 5000);
+  } else toast("열림");
 }
 
 function unitVisible(u) {
